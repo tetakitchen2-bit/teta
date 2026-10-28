@@ -205,6 +205,7 @@ const prod=c=>DB.products.find(p=>p.code===c);
 const cust=id=>DB.customers.find(c=>c.id===id);
 const lowOf=p=>p.stock!=null&&p.stock<=(p.min??DB.settings.lowStock);
 const lowList=()=>DB.products.filter(p=>p.active&&lowOf(p));
+const ep=p=>{const d=+p.disc||0;return d>0&&d<100?Math.round(p.price*(100-d))/100:p.price};
 const PAGE={};
 const go=p=>{S.page=p;render()};
 
@@ -264,8 +265,9 @@ async function syncProducts(manual){
  if(!cloudOn())return manual&&toast('اربط الموقع الأول من الإعدادات');
  try{
   const ts=new Date().toISOString();
-  const rows=DB.products.map((p,i)=>({code:p.code,name:p.name,size:p.size||'',cat:p.cat||'أخرى',price:p.price,active:!!p.active,in_stock:p.stock==null||p.stock>0,image_url:p.img||null,sort:i,updated_at:ts}));
-  await cApi('/rest/v1/products?on_conflict=code',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(rows)});
+  const rows=DB.products.map((p,i)=>({code:p.code,name:p.name,size:p.size||'',cat:p.cat||'أخرى',price:ep(p),old_price:(+p.disc>0)?p.price:null,discount:+p.disc>0?+p.disc:0,active:!!p.active,in_stock:p.stock==null||p.stock>0,image_url:p.img||null,sort:i,updated_at:ts}));
+  const up=b=>cApi('/rest/v1/products?on_conflict=code',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(b)});
+  try{await up(rows)}catch(e){if(/old_price|discount/.test(e.message)&&!rows.some(r=>r.discount>0))await up(rows.map(({old_price,discount,...r})=>r));else throw e}
   CL.last=Date.now();manual&&toast('تم رفع المنتجات للموقع ✔')
  }catch(e){CL.err=e.message;manual&&toast('تعذّر الرفع: '+e.message)}}
 function schedSync(){if(!cloudOn())return;clearTimeout(CL.sync);CL.sync=setTimeout(()=>syncProducts(),2500)}
@@ -417,12 +419,19 @@ function waOrder(id){const o=CL.pend.find(x=>x.id==id);if(o)waSend(o.phone,`أه
 function payMap(name){const pays=DB.settings.pays,n=String(name||'');
  const pick=k=>pays.find(p=>p.includes(k));
  return(n.includes('فودافون')&&pick('فودافون'))||(n.includes('انستا')&&pick('انستا'))||pick('كاش')||pays[0]}
-async function acceptOrder(id){
+function acceptOrder(id){
+ const o=CL.pend.find(x=>x.id==id);if(!o)return;
+ if(DB.sales.some(s=>s.onlineId==o.id))return doAccept(id,0,'amt');
+ modal(`<h3>قبول الطلب #${o.no}</h3><p>${esc(o.name)} — المنتجات ${n2(o.subtotal)}${o.delivery>0?' + توصيل '+n2(o.delivery):''} = <b>${n2(o.total)} ج</b></p><label>خصم على الطلب (اختياري)</label><div class="row"><input id="ad_v" type="number" min="0" placeholder="0" oninput="accTot('${id}')"><select id="ad_t" style="max-width:80px" onchange="accTot('${id}')"><option value="amt">ج</option><option value="pct">%</option></select></div><div class="tot" id="ad_tot"></div><p class="mut">هيتسجل كفاتورة وهيتخصم من المخزون.</p><div class="row"><button class="btn ok" onclick="doAccept('${id}',+val('ad_v')||0,val('ad_t'))">✔ قبول وتسجيل</button><button class="btn g" onclick="closeModal()">إلغاء</button></div>`);accTot(id)}
+function accDisc(o,v,t){const d=t=='pct'?o.subtotal*v/100:v;return Math.round(Math.min(Math.max(d,0),o.subtotal)*100)/100}
+function accTot(id){const o=CL.pend.find(x=>x.id==id);if(!o)return;const d=accDisc(o,+val('ad_v')||0,val('ad_t'));$('#ad_tot').innerHTML=`${d?`<div><span>الخصم</span><span>- ${n2(d)}</span></div>`:''}<div class="g"><span>الإجمالي بعد الخصم</span><span>${n2(o.subtotal-d+(+o.delivery||0))} ج</span></div>`}
+async function doAccept(id,dv,dtype){
+ closeModal();
  const o=CL.pend.find(x=>x.id==id);if(!o)return;
  if(syncOn())await pullChanges();
  let sale=DB.sales.find(s=>s.onlineId==o.id);
  if(!sale){
-  if(!confirm(`قبول الطلب #${o.no} وتسجيله كفاتورة؟ (هيتخصم من المخزون)`))return;
+  const disc=accDisc(o,dv,dtype);
   const digits=String(o.phone).replace(/\D/g,'').slice(-10);
   let c=DB.customers.find(x=>String(x.phone||'').replace(/\D/g,'').slice(-10)===digits);
   if(!c){c={id:uid(),created:new Date().toISOString(),name:o.name,phone:o.phone,area:o.area||'',address:o.address||'',source:'موقع تيتة',notes:''};DB.customers.push(c);save('customers')}
@@ -430,7 +439,7 @@ async function acceptOrder(id){
   const st=DB.settings;
   sale={id:uid(),no:await nextNo(),date:new Date().toISOString(),userId:S.user.id,userName:S.user.name,customerId:c.id,customerName:c.name,
    items:(o.items||[]).map(i=>{const p=prod(i.code);return{code:i.code,name:i.name,size:i.size||'',qty:i.qty,price:i.price,cost:p?p.cost:0}}),
-   subtotal:o.subtotal,discount:0,delivery:+o.delivery||0,total:o.total,pay:payMap(o.pay),
+   subtotal:o.subtotal,discount:disc,delivery:+o.delivery||0,total:Math.round((o.subtotal-disc+(+o.delivery||0))*100)/100,pay:payMap(o.pay),
    note:['طلب موقع #'+o.no,o.pay_ref?'مرجع: '+o.pay_ref:'',o.notes||''].filter(Boolean).join(' | '),area:o.area||'',address:o.address||'',status:'ok',onlineId:o.id};
   st.nextInvoice=sale.no+1;DB.sales.push(sale);
   for(const i of sale.items){const p=prod(i.code);if(p&&p.stock!=null){p.stock-=i.qty;DB.stocklog.push({date:sale.date,code:p.code,delta:-i.qty,reason:'طلب موقع #'+o.no,user:S.user.name})}}
@@ -456,17 +465,17 @@ function drawGrid(){
  $('#chips').innerHTML=['',...cats()].map(c=>`<a class="${S.cat==c?'on':''}" onclick="S.cat='${esc(c)}';drawGrid()">${c||'الكل'}</a>`).join('');
  const q=S.q.trim();
  const l=DB.products.filter(p=>p.active&&p.price>0&&(!S.cat||(p.cat||'أخرى')==S.cat)&&(!q||(p.name+' '+p.size+' '+p.code).includes(q)));
- $('#pgrid').innerHTML=l.map(p=>`<div class="pc ${p.stock!=null&&p.stock<=0?'out':''}" onclick="addCart('${p.code}')"><div class="pn">${esc(p.name)}</div><div class="ps">${esc(p.size)}</div><div class="pp">${n2(p.price)} ج</div>${p.stock!=null?`<div class="st ${lowOf(p)?'lw':''}">متاح: ${p.stock}</div>`:''}</div>`).join('')||'<p class="mut">مفيش منتجات</p>'}
+ $('#pgrid').innerHTML=l.map(p=>`<div class="pc ${p.stock!=null&&p.stock<=0?'out':''}" onclick="addCart('${p.code}')"><div class="pn">${esc(p.name)}</div><div class="ps">${esc(p.size)}</div><div class="pp">${(+p.disc>0)?`<s class="mut" style="font-weight:400">${n2(p.price)}</s> `:''}${n2(ep(p))} ج${(+p.disc>0)?` <span class="bd">-${p.disc}%</span>`:''}</div>${p.stock!=null?`<div class="st ${lowOf(p)?'lw':''}">متاح: ${p.stock}</div>`:''}</div>`).join('')||'<p class="mut">مفيش منتجات</p>'}
 function addCart(c){const i=S.cart.find(x=>x.code==c);i?i.qty++:S.cart.push({code:c,qty:1});drawCart()}
 function qty(c,d){const i=S.cart.find(x=>x.code==c);if(!i)return;i.qty+=d;if(i.qty<=0)S.cart=S.cart.filter(x=>x!==i);drawCart()}
 function clearCart(){S.cart=[];S.disc='';S.note='';S.cust='';S.area='';S.addr='';drawCart()}
 function pickCust(id){S.cust=id;const c=cust(id);S.area=c?c.area||'':'';S.addr=c?c.address||'':'';drawCart()}
 const areasList=()=>[...new Set([...DB.customers.map(c=>c.area),...DB.sales.map(s=>s.area)].filter(Boolean))];
-function totals(){const sub=S.cart.reduce((a,i)=>a+prod(i.code).price*i.qty,0);let d=S.dtype=='pct'?sub*(+S.disc||0)/100:(+S.disc||0);d=Math.min(Math.max(d,0),sub);return{sub,d,total:sub-d}}
+function totals(){const sub=S.cart.reduce((a,i)=>a+ep(prod(i.code))*i.qty,0);let d=S.dtype=='pct'?sub*(+S.disc||0)/100:(+S.disc||0);d=Math.min(Math.max(d,0),sub);return{sub,d,total:sub-d}}
 function drawCart(){
  const pays=DB.settings.pays;if(!S.pay||!pays.includes(S.pay))S.pay=pays[0];
  const cs=[...DB.customers].sort((a,b)=>a.name.localeCompare(b.name,'ar'));
- $('#cart').innerHTML=`<h3>🧾 الفاتورة</h3><div class="items">${S.cart.map(i=>{const p=prod(i.code);return `<div class="ci"><div class="cn">${esc(p.name)} <small class="mut">${esc(p.size)}</small><br><small class="mut">${n2(p.price)} ج</small></div><div class="qty"><button onclick="qty('${i.code}',-1)">−</button><b>${i.qty}</b><button onclick="qty('${i.code}',1)">+</button></div><div class="ct">${n2(p.price*i.qty)}</div><a onclick="qty('${i.code}',-9999)">✕</a></div>`}).join('')||'<p class="mut">اضغط على منتج لإضافته</p>'}</div>
+ $('#cart').innerHTML=`<h3>🧾 الفاتورة</h3><div class="items">${S.cart.map(i=>{const p=prod(i.code);return `<div class="ci"><div class="cn">${esc(p.name)} <small class="mut">${esc(p.size)}</small><br><small class="mut">${n2(ep(p))} ج</small></div><div class="qty"><button onclick="qty('${i.code}',-1)">−</button><b>${i.qty}</b><button onclick="qty('${i.code}',1)">+</button></div><div class="ct">${n2(ep(p)*i.qty)}</div><a onclick="qty('${i.code}',-9999)">✕</a></div>`}).join('')||'<p class="mut">اضغط على منتج لإضافته</p>'}</div>
  <label>العميل</label><div class="row"><select onchange="pickCust(this.value)"><option value="">— بدون عميل —</option>${cs.map(c=>`<option value="${c.id}" ${S.cust==c.id?'selected':''}>${esc(c.name)} ${esc(c.phone||'')}</option>`).join('')}</select><button class="btn o s" onclick="custModal(null,true)">+ جديد</button></div>
  <div class="row"><div style="flex:1"><label>المنطقة</label><input list="arl" value="${esc(S.area)}" oninput="S.area=this.value"><datalist id="arl">${areasList().map(a=>`<option value="${esc(a)}">`).join('')}</datalist></div><div style="flex:2"><label>العنوان</label><input value="${esc(S.addr)}" oninput="S.addr=this.value"></div></div>
  ${can('discount')?`<label>الخصم</label><div class="row"><input type="number" min="0" value="${esc(S.disc)}" oninput="S.disc=this.value;drawTotals()"><select style="max-width:80px" onchange="S.dtype=this.value;drawTotals()"><option value="amt" ${S.dtype=='amt'?'selected':''}>ج</option><option value="pct" ${S.dtype=='pct'?'selected':''}>%</option></select></div>`:''}
@@ -483,7 +492,7 @@ async function checkout(){
  if(!S.cart.length)return;
  st.nextInvoice=no+1;
  const sale={id:uid(),no,date:new Date().toISOString(),userId:S.user.id,userName:S.user.name,customerId:c?c.id:'',customerName:c?c.name:'',
-  items:S.cart.map(i=>{const p=prod(i.code);return{code:p.code,name:p.name,size:p.size,qty:i.qty,price:p.price,cost:p.cost}}),
+  items:S.cart.map(i=>{const p=prod(i.code);return{code:p.code,name:p.name,size:p.size,qty:i.qty,price:ep(p),cost:p.cost}}),
   subtotal:t.sub,discount:t.d,total:t.total,pay:S.pay,note:S.note,area:S.area.trim(),address:S.addr.trim(),status:'ok'};
  if(c){let ch=false;if(!c.area&&sale.area){c.area=sale.area;ch=true}if(!c.address&&sale.address){c.address=sale.address;ch=true}if(ch)save('customers')}
  DB.sales.push(sale);
@@ -522,18 +531,19 @@ function cancelSale(id){const s=DB.sales.find(x=>x.id==id);if(!s||!confirm(`إل
 
 /* ================= المنتجات والمخزون ================= */
 PAGE.products=()=>{const lw=lowList();
- $('#main').innerHTML=`<div class="row"><button class="btn" onclick="prodModal()">+ منتج جديد</button><button class="btn o" onclick="prodXlsx()">Excel</button><button class="btn o" onclick="syncProducts(true)">☁️ رفع المنتجات للموقع</button></div>${lw.length?`<div class="banner" style="border-radius:8px;margin-bottom:10px">⚠️ مخزون منخفض: ${lw.map(p=>esc(p.name+' '+p.size)+' ('+p.stock+')').join('، ')}</div>`:''}<div class="card tw"><table><tr><th>صورة</th><th>الكود</th><th>المنتج</th><th>الحجم</th><th>السعر</th><th>التكلفة</th><th>الهامش</th><th>المخزون</th><th>نشط</th><th></th></tr>${DB.products.map(p=>`<tr><td>${p.img?`<img class="thumb" src="${esc(p.img)}" alt="">`:'<div class="thumb"></div>'}</td><td>${p.code}</td><td>${esc(p.name)}</td><td>${esc(p.size)}</td><td>${n2(p.price)}</td><td>${n2(p.cost)}</td><td>${p.price?Math.round((p.price-p.cost)/p.price*100)+'%':''}</td><td class="${lowOf(p)?'st lw':''}">${p.stock==null?'<span class="mut">غير متابع</span>':p.stock}</td><td>${p.active?'نعم':'لا'}</td><td><button class="btn s o" onclick="prodModal('${p.code}')">تعديل</button> <button class="btn s" onclick="recv('${p.code}')">+ استلام</button></td></tr>`).join('')}</table></div>`};
+ $('#main').innerHTML=`<div class="row"><button class="btn" onclick="prodModal()">+ منتج جديد</button><button class="btn o" onclick="prodXlsx()">Excel</button><button class="btn o" onclick="syncProducts(true)">☁️ رفع المنتجات للموقع</button></div>${lw.length?`<div class="banner" style="border-radius:8px;margin-bottom:10px">⚠️ مخزون منخفض: ${lw.map(p=>esc(p.name+' '+p.size)+' ('+p.stock+')').join('، ')}</div>`:''}<div class="card tw"><table><tr><th>صورة</th><th>الكود</th><th>المنتج</th><th>الحجم</th><th>السعر</th><th>التكلفة</th><th>الهامش</th><th>المخزون</th><th>نشط</th><th></th></tr>${DB.products.map(p=>`<tr><td>${p.img?`<img class="thumb" src="${esc(p.img)}" alt="">`:'<div class="thumb"></div>'}</td><td>${p.code}</td><td>${esc(p.name)}</td><td>${esc(p.size)}</td><td>${+p.disc>0?`<s class="mut">${n2(p.price)}</s> ${n2(ep(p))} <span class="bd">-${p.disc}%</span>`:n2(p.price)}</td><td>${n2(p.cost)}</td><td>${ep(p)?Math.round((ep(p)-p.cost)/ep(p)*100)+'%':''}</td><td class="${lowOf(p)?'st lw':''}">${p.stock==null?'<span class="mut">غير متابع</span>':p.stock}</td><td>${p.active?'نعم':'لا'}</td><td><button class="btn s o" onclick="prodModal('${p.code}')">تعديل</button> <button class="btn s" onclick="recv('${p.code}')">+ استلام</button></td></tr>`).join('')}</table></div>`};
 function prodModal(code){const p=code?prod(code):{code:'',name:'',size:'',price:'',cost:'',stock:null,min:null,active:true,cat:''};
- modal(`<h3>${code?'تعديل منتج '+code:'منتج جديد'}</h3><label>اسم المنتج</label><input id="f_name" value="${esc(p.name)}"><div class="row"><div style="flex:1"><label>الحجم / النوع</label><input id="f_size" value="${esc(p.size)}"></div><div style="flex:1"><label>التصنيف</label><input id="f_cat" list="cl" value="${esc(p.cat)}"><datalist id="cl">${[...new Set(DB.products.map(x=>x.cat))].map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div></div><div class="row"><div style="flex:1"><label>سعر البيع</label><input id="f_price" type="number" value="${p.price}"></div><div style="flex:1"><label>التكلفة</label><input id="f_cost" type="number" value="${p.cost}"></div></div><div class="row"><div style="flex:1"><label>المخزون (فاضي = غير متابع)</label><input id="f_stock" type="number" value="${p.stock??''}"></div><div style="flex:1"><label>حد التنبيه (فاضي = الافتراضي)</label><input id="f_min" type="number" value="${p.min??''}"></div></div><label>صورة المنتج (بتظهر في صفحة الطلب)</label><div class="row">${p.img?`<img class="thumb" src="${esc(p.img)}" alt="">`:''}<input type="file" id="f_img" accept="image/*"></div><label><input type="checkbox" id="f_act" ${p.active?'checked':''}> نشط (يظهر في البيع وفي الموقع)</label><div class="row" style="margin-top:12px"><button class="btn" id="svp" onclick="saveProd('${code||''}')">حفظ</button><button class="btn g" onclick="closeModal()">إلغاء</button></div>`)}
-async function saveProd(code){const name=val('f_name'),price=+val('f_price'),cost=+val('f_cost');
+ modal(`<h3>${code?'تعديل منتج '+code:'منتج جديد'}</h3><label>اسم المنتج</label><input id="f_name" value="${esc(p.name)}"><div class="row"><div style="flex:1"><label>الحجم / النوع</label><input id="f_size" value="${esc(p.size)}"></div><div style="flex:1"><label>التصنيف</label><input id="f_cat" list="cl" value="${esc(p.cat)}"><datalist id="cl">${[...new Set(DB.products.map(x=>x.cat))].map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div></div><div class="row"><div style="flex:1"><label>سعر البيع</label><input id="f_price" type="number" value="${p.price}"></div><div style="flex:1"><label>التكلفة</label><input id="f_cost" type="number" value="${p.cost}"></div></div><div class="row"><div style="flex:1"><label>خصم % على المنتج (اختياري — بيظهر في الموقع والكاشير)</label><input id="f_disc" type="number" min="0" max="99" value="${p.disc||''}"></div></div><div class="row"><div style="flex:1"><label>المخزون (فاضي = غير متابع)</label><input id="f_stock" type="number" value="${p.stock??''}"></div><div style="flex:1"><label>حد التنبيه (فاضي = الافتراضي)</label><input id="f_min" type="number" value="${p.min??''}"></div></div><label>صورة المنتج (بتظهر في صفحة الطلب)</label><div class="row">${p.img?`<img class="thumb" src="${esc(p.img)}" alt="">`:''}<input type="file" id="f_img" accept="image/*"></div><label><input type="checkbox" id="f_act" ${p.active?'checked':''}> نشط (يظهر في البيع وفي الموقع)</label><div class="row" style="margin-top:12px"><button class="btn" id="svp" onclick="saveProd('${code||''}')">حفظ</button><button class="btn g" onclick="closeModal()">إلغاء</button></div>`)}
+async function saveProd(code){const name=val('f_name'),price=+val('f_price'),cost=+val('f_cost'),disc=val('f_disc')===''?0:+val('f_disc');
  if(!name||!(price>0))return toast('اكتب الاسم وسعر البيع');
+ if(!(disc>=0&&disc<100))return toast('الخصم لازم يكون بين 0 و 99');
  const file=$('#f_img')&&$('#f_img').files[0];
  if(file&&!cloudOn())return toast('اربط الموقع الأول من الإعدادات عشان ترفع الصورة');
  let p=code?prod(code):null;
  if(!p){const mx=Math.max(0,...DB.products.map(x=>+x.code.slice(1)||0));p={code:'P'+p2(mx+1)};DB.products.push(p)}
  const ns=val('f_stock')===''?null:+val('f_stock');
  if(ns!==p.stock&&ns!=null)DB.stocklog.push({date:new Date().toISOString(),code:p.code,delta:ns-(p.stock||0),reason:'تعديل يدوي',user:S.user.name});
- Object.assign(p,{name,size:val('f_size'),cat:val('f_cat')||catOf(name),price,cost,stock:ns,min:val('f_min')===''?null:+val('f_min'),active:$('#f_act').checked});
+ Object.assign(p,{name,size:val('f_size'),cat:val('f_cat')||catOf(name),price,cost,disc,stock:ns,min:val('f_min')===''?null:+val('f_min'),active:$('#f_act').checked});
  save('products','stocklog');
  if(file){const b=$('#svp');if(b){b.disabled=true;b.textContent='جاري رفع الصورة...'}
   try{p.img=await uploadImg('products/'+p.code+'.jpg',await toJpeg(file,800,.82));save('products')}catch(e){toast('اتحفظ المنتج لكن الصورة فشلت: '+e.message)}}
