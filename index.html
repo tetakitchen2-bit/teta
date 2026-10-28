@@ -219,7 +219,7 @@ function toast(m){const t=$('#toast');t.textContent=m;t.className='show';clearTi
 const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
 
-const S={products:[],shop:{shop_name:'تيتة',delivery_fee:0,min_order:0,accepting:true},cart:lsGet('tt_cart',{}),cat:'',q:'',view:'cart',pay:'cash',shipI:0,busy:false,err:'',done:null,
+const S={products:[],shop:{shop_name:'تيتة',min_order:0,accepting:true},cart:lsGet('tt_cart',{}),cat:'',q:'',view:'cart',pay:'cash',busy:false,err:'',done:null,
   f:lsGet('tt_cust',{name:'',phone:'',area:'',address:'',notes:'',ref:''})};
 const prod=c=>S.products.find(p=>p.code===c);
 const saveCart=()=>lsSet('tt_cart',S.cart);
@@ -283,16 +283,11 @@ function drawCounter(){
     const s=Math.floor(d/1000),u=[['يوم',Math.floor(s/86400)],['ساعة',Math.floor(s%86400/3600)],['دقيقة',Math.floor(s%3600/60)],['ثانية',s%60]];
     box.innerHTML=`<div class="cd">${c.title?`<b class="ct">${esc(c.title)}</b>`:''}<div class="cu">${u.map(([l,v])=>`<span><i>${String(v).padStart(2,'0')}</i>${l}</span>`).join('')}</div></div>`};
   tick();cdT=setInterval(tick,1000)}
-const activeShip=()=>(SITE().ship||[]).filter(x=>x.active!==false&&x.name);
-const freeNow=()=>{const f=+SITE().freeOver||0;return !!f&&sub()>=f};
-function shipAreas(x){return String(x&&x.areas||'').split('\n').map(ln=>{const i=ln.indexOf('=');return i>0?{name:ln.slice(0,i).trim(),fee:ln.slice(i+1).trim()}:null}).filter(a=>a&&a.name&&a.fee!=='')}
-function shipFeeOf(x){let fee=+x.fee||0;const a=String(S.f.area||'').trim();const found=shipAreas(x).find(z=>z.name===a);if(found)fee=+found.fee||0;return fee}
-function curShip(){const L=activeShip();if(!L.length)return null;if(!(S.shipI>=0&&S.shipI<L.length))S.shipI=0;return L[S.shipI]}
-const shipFee=()=>{const s=curShip();return s?shipFeeOf(s):(+S.shop.delivery_fee||0)};
-function shipNote(){const s=curShip();return s?'شحن: '+s.name+' — '+(freeNow()?'مجاني':n2(shipFee())+' ج'):''}
-function shipHTML(){const L=activeShip();if(!L.length)return '';curShip();const fo=+SITE().freeOver||0;
-  return '<label class="f">شركة الشحن</label>'+L.map((x,i)=>`<label class="pm ${S.shipI==i?'on':''}"><input type="radio" name="ship" ${S.shipI==i?'checked':''} onchange="setShip(${i})"> <span>🚚 ${esc(x.name)}${x.eta?` <small>(مدة التوصيل المتوقعة: ${esc(x.eta)})</small>`:''}</span><b class="sf">${freeNow()?'مجاني':n2(shipFeeOf(x))+' ج'}</b></label>`).join('')+(fo?`<div class="note">شحن مجاني للطلبات فوق ${n2(fo)} ج 🎁</div>`:'')}
-function setShip(i){readForm();S.shipI=i;S.err='';drawDrawer()}
+const deliveryAreas=()=>{const st=SITE(),a=Array.isArray(st.deliveryAreas)?st.deliveryAreas:[];return a.filter(x=>String(x.name||'').trim()&&x.fee!==''&&x.fee!==null&&x.fee!==undefined)};
+const areaFee=()=>{const a=deliveryAreas().find(x=>String(x.name).trim()===String(S.f.area||'').trim());return a?Math.max(0,+a.fee||0):0};
+const shipFee=()=>areaFee();
+function shipNote(){const a=deliveryAreas().find(x=>String(x.name).trim()===String(S.f.area||'').trim());return a?'منطقة التوصيل: '+a.name+' — '+n2(+a.fee||0)+' ج':''}
+function shipHTML(){const L=deliveryAreas(),eta=String(SITE().deliveryEta||'').trim();return `${eta?`<div class="note">مدة التوصيل المتوقعة: ${esc(eta)}</div>`:''}<label class="f">منطقة التوصيل</label><select class="in" id="f_area" onchange="readForm();drawDrawer()"><option value="">اختار المنطقة</option>${L.map(a=>`<option value="${esc(a.name)}" ${S.f.area===a.name?'selected':''}>${esc(a.name)} — ${n2(+a.fee||0)} ج</option>`).join('')}</select>`}
 function refFoot(){const t=document.querySelector('#dFoot .tot');if(!t)return;const d=document.createElement('div');d.innerHTML=totHTML();const n=d.querySelector('.tot');if(n)t.innerHTML=n.innerHTML}
 function payMethods(){const st=SITE(),o=[];
   if(st.cashOn!==false)o.push({k:'cash',label:st.cashLabel||'💵 كاش عند الاستلام',name:'كاش عند الاستلام'});
@@ -359,7 +354,7 @@ function chg(c,d){
 
 const items=()=>Object.keys(S.cart).map(c=>({p:prod(c),q:S.cart[c]})).filter(x=>x.p);
 const sub=()=>items().reduce((a,x)=>a+x.p.price*x.q,0);
-const delivery=()=>!items().length?0:freeNow()?0:activeShip().length?shipFee():(+S.shop.delivery_fee||0);
+const delivery=()=>!items().length?0:areaFee();
 const count=()=>items().reduce((a,x)=>a+x.q,0);
 function updCart(){
   const n=count();$('#hCnt').textContent=n;
@@ -385,7 +380,6 @@ function drawDrawer(){
   body.innerHTML=`<input class="hp" id="f_hp" tabindex="-1" autocomplete="off">
   <label class="f">الاسم</label><input class="in" id="f_name" value="${esc(f.name)}" autocomplete="name">
   <label class="f">رقم الموبايل (واتساب)</label><input class="in" id="f_phone" type="tel" inputmode="tel" value="${esc(f.phone)}" autocomplete="tel">
-  <label class="f">المنطقة</label>${(()=>{const opts=shipAreas(curShip());return opts.length?`<select class="in" id="f_area" onchange="readForm();refFoot()"><option value="">اختار المنطقة</option>${opts.map(a=>`<option value="${esc(a.name)}" ${f.area===a.name?'selected':''}>${esc(a.name)} — ${n2(a.fee)} ج</option>`).join('')}</select>`:`<input class="in" id="f_area" value="${esc(f.area)}" oninput="readForm();refFoot()">`})()}
   <label class="f">العنوان بالتفصيل</label><input class="in" id="f_addr" value="${esc(f.address)}" autocomplete="street-address">
   <label class="f">ملاحظات (اختياري)</label><input class="in" id="f_notes" value="${esc(f.notes)}">
   ${shipHTML()}
@@ -417,6 +411,7 @@ async function submitOrder(){
   const fail=m=>{S.err=m;drawDrawer()};
   if(f.name.length<2)return fail('اكتب اسمك');
   if(digits.length<10)return fail('رقم الموبايل مش مظبوط');
+  if(!deliveryAreas().some(a=>String(a.name).trim()===String(f.area||'').trim()))return fail('اختار منطقة التوصيل عشان نحدد السعر');
   if(f.address.length<3)return fail('اكتب عنوانك بالتفصيل');
   const tr=!!(payMethods().find(m=>m.k==S.pay)||{}).transfer,file=$('#f_rec')&&$('#f_rec').files[0];
   if(tr&&!f.ref&&!file)return fail('اكتب رقم العملية أو ارفع صورة التحويل');
