@@ -285,14 +285,13 @@ function drawCounter(){
   tick();cdT=setInterval(tick,1000)}
 const activeShip=()=>(SITE().ship||[]).filter(x=>x.active!==false&&x.name);
 const freeNow=()=>{const f=+SITE().freeOver||0;return !!f&&sub()>=f};
-function shipFeeOf(x){let fee=+x.fee||0;const a=String(S.f.area||'').trim();
-  if(a&&x.areas){for(const ln of String(x.areas).split('\n')){const i=ln.indexOf('=');if(i>0&&a.includes(ln.slice(0,i).trim())&&ln.slice(i+1).trim()!==''){fee=+ln.slice(i+1)||0;break}}}
-  return fee}
+function shipAreas(x){return String(x&&x.areas||'').split('\n').map(ln=>{const i=ln.indexOf('=');return i>0?{name:ln.slice(0,i).trim(),fee:ln.slice(i+1).trim()}:null}).filter(a=>a&&a.name&&a.fee!=='')}
+function shipFeeOf(x){let fee=+x.fee||0;const a=String(S.f.area||'').trim();const found=shipAreas(x).find(z=>z.name===a);if(found)fee=+found.fee||0;return fee}
 function curShip(){const L=activeShip();if(!L.length)return null;if(!(S.shipI>=0&&S.shipI<L.length))S.shipI=0;return L[S.shipI]}
 const shipFee=()=>{const s=curShip();return s?shipFeeOf(s):(+S.shop.delivery_fee||0)};
 function shipNote(){const s=curShip();return s?'شحن: '+s.name+' — '+(freeNow()?'مجاني':n2(shipFee())+' ج'):''}
 function shipHTML(){const L=activeShip();if(!L.length)return '';curShip();const fo=+SITE().freeOver||0;
-  return '<label class="f">شركة الشحن</label>'+L.map((x,i)=>`<label class="pm ${S.shipI==i?'on':''}"><input type="radio" name="ship" ${S.shipI==i?'checked':''} onchange="setShip(${i})"> <span>🚚 ${esc(x.name)}${x.eta?` <small>(${esc(x.eta)})</small>`:''}</span><b class="sf">${freeNow()?'مجاني':n2(shipFeeOf(x))+' ج'}</b></label>`).join('')+(fo?`<div class="note">شحن مجاني للطلبات فوق ${n2(fo)} ج 🎁</div>`:'')}
+  return '<label class="f">شركة الشحن</label>'+L.map((x,i)=>`<label class="pm ${S.shipI==i?'on':''}"><input type="radio" name="ship" ${S.shipI==i?'checked':''} onchange="setShip(${i})"> <span>🚚 ${esc(x.name)}${x.eta?` <small>(مدة التوصيل المتوقعة: ${esc(x.eta)})</small>`:''}</span><b class="sf">${freeNow()?'مجاني':n2(shipFeeOf(x))+' ج'}</b></label>`).join('')+(fo?`<div class="note">شحن مجاني للطلبات فوق ${n2(fo)} ج 🎁</div>`:'')}
 function setShip(i){readForm();S.shipI=i;S.err='';drawDrawer()}
 function refFoot(){const t=document.querySelector('#dFoot .tot');if(!t)return;const d=document.createElement('div');d.innerHTML=totHTML();const n=d.querySelector('.tot');if(n)t.innerHTML=n.innerHTML}
 function payMethods(){const st=SITE(),o=[];
@@ -386,7 +385,7 @@ function drawDrawer(){
   body.innerHTML=`<input class="hp" id="f_hp" tabindex="-1" autocomplete="off">
   <label class="f">الاسم</label><input class="in" id="f_name" value="${esc(f.name)}" autocomplete="name">
   <label class="f">رقم الموبايل (واتساب)</label><input class="in" id="f_phone" type="tel" inputmode="tel" value="${esc(f.phone)}" autocomplete="tel">
-  <label class="f">المنطقة</label><input class="in" id="f_area" value="${esc(f.area)}" oninput="readForm();refFoot()">
+  <label class="f">المنطقة</label>${(()=>{const opts=shipAreas(curShip());return opts.length?`<select class="in" id="f_area" onchange="readForm();refFoot()"><option value="">اختار المنطقة</option>${opts.map(a=>`<option value="${esc(a.name)}" ${f.area===a.name?'selected':''}>${esc(a.name)} — ${n2(a.fee)} ج</option>`).join('')}</select>`:`<input class="in" id="f_area" value="${esc(f.area)}" oninput="readForm();refFoot()">`})()}
   <label class="f">العنوان بالتفصيل</label><input class="in" id="f_addr" value="${esc(f.address)}" autocomplete="street-address">
   <label class="f">ملاحظات (اختياري)</label><input class="in" id="f_notes" value="${esc(f.notes)}">
   ${shipHTML()}
