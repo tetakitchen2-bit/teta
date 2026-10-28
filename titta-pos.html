@@ -128,7 +128,7 @@ function download(blob,name){const a=document.createElement('a');a.href=URL.crea
 /* ================= الإعدادات والبيانات الأولية ================= */
 const PERMS={pos:'البيع (الكاشير)',orders:'طلبات الموقع',discount:'إعطاء خصم',invoices:'عرض الفواتير',cancel:'إلغاء الفواتير',products:'المنتجات والمخزون',customers:'العملاء',expenses:'المصروفات',reports:'التقارير والأرباح',settings:'الإعدادات'};
 const ROLES={manager:['مدير',Object.keys(PERMS)],cashier:['كاشير',['pos','orders','invoices','customers']],accountant:['محاسب',['invoices','expenses','reports','customers']]};
-const PAGES=[['pos','🛒 البيع'],['orders','🌐 طلبات الموقع'],['invoices','🧾 الفواتير'],['products','📦 المنتجات والمخزون'],['customers','👥 العملاء'],['expenses','💸 المصروفات'],['reports','📊 التقارير'],['settings','⚙️ الإعدادات']];
+const PAGES=[['pos','🛒 البيع'],['orders','🌐 طلبات الموقع'],['invoices','🧾 الفواتير'],['products','📦 المنتجات والمخزون'],['customers','👥 العملاء'],['expenses','💸 المصروفات'],['reports','📊 التقارير'],['site','🎨 تصميم الموقع'],['settings','⚙️ الإعدادات']];
 const DEF_SET={shopName:'تيتة',phone:'',address:'',footer:'شكراً لتعاملكم مع تيتة',logo:'',paper:'80',autoPrint:false,cc:'20',lowStock:5,nextInvoice:1,lastBackup:0,
  pays:['كاش','فودافون كاش','انستاباي','فيزا'],sources:['زيارة المحل','انستجرام','فيسبوك','تيك توك','واتساب','ترشيح من صديق','موقع تيتة'],expCats:['مواد خام','تغليف','رواتب','إيجار','مواصلات','تسويق','أخرى'],
  cloud:{url:'https://xvhdxtnixtdtzicrddlt.supabase.co',key:'sb_publishable__riAVMylXV233y6kwbs_sw_DB6sGqyC',email:'tetakitchen2@gmail.com',rt:''},
@@ -211,7 +211,7 @@ const go=p=>{S.page=p;render()};
 
 function render(){
  if(!S.user)return login();
- const pg=PAGES.filter(p=>can(p[0]));
+ const pg=PAGES.filter(p=>can(p[0]=='site'?'settings':p[0]));
  if(!can(S.page))S.page=pg[0]&&pg[0][0];
  const lw=lowList().length,np=CL.pend.length;
  const old=can('settings')&&DB.sales.length&&Date.now()-DB.settings.lastBackup>7*864e5;
@@ -281,8 +281,9 @@ async function pushSettings(manual){
    const cv=document.createElement('canvas');cv.width=im.width;cv.height=im.height;const x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,cv.width,cv.height);x.drawImage(im,0,0);
    const jb=await new Promise(ok=>cv.toBlob(ok,'image/jpeg',.9));
    st.logoUrl=await uploadImg('logo.jpg',jb);st.logoUp=hash(st.logo);save('settings')}
-  const row={id:1,shop_name:st.shopName,phone:st.phone,address:st.address,footer:st.footer,logo_url:st.logoUrl||null,whatsapp:st.whatsapp,vcash:st.vcash,instapay:st.instapay,delivery_fee:+st.deliveryFee||0,min_order:+st.minOrder||0,accepting:st.accepting!==false};
-  await cApi('/rest/v1/shop_settings?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify([row])});
+  const row={id:1,shop_name:st.shopName,phone:st.phone,address:st.address,footer:st.footer,logo_url:st.logoUrl||null,whatsapp:st.whatsapp,vcash:st.vcash,instapay:st.instapay,delivery_fee:+st.deliveryFee||0,min_order:+st.minOrder||0,accepting:st.accepting!==false,site:st.site||{}};
+  const up=r=>cApi('/rest/v1/shop_settings?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify([r])});
+  try{await up(row)}catch(e){if(/site/i.test(e.message)){delete row.site;await up(row);return manual&&toast('اتحفظت الإعدادات لكن التصميم لم يُرفع: شغّل ملف supabase-site.sql مرة واحدة')}throw e}
   manual&&toast('تم رفع الإعدادات للموقع ✔')
  }catch(e){manual&&toast('تعذّر الرفع: '+e.message)}}
 function beep(){try{const a=new (window.AudioContext||window.webkitAudioContext)(),o=a.createOscillator(),g=a.createGain();o.connect(g);g.connect(a.destination);o.frequency.value=880;g.gain.setValueAtTime(.25,a.currentTime);g.gain.exponentialRampToValueAtTime(.001,a.currentTime+.6);o.start();o.stop(a.currentTime+.6)}catch(e){}}
@@ -418,7 +419,7 @@ function orderCard(o){
 function waOrder(id){const o=CL.pend.find(x=>x.id==id);if(o)waSend(o.phone,`أهلاً ${o.name} 🍓\nده طلبك رقم ${o.no} من ${DB.settings.shopName}.\nالإجمالي: ${n2(o.total)} ج.\nعايزين نأكد معاك العنوان والميعاد.`)}
 function payMap(name){const pays=DB.settings.pays,n=String(name||'');
  const pick=k=>pays.find(p=>p.includes(k));
- return(n.includes('فودافون')&&pick('فودافون'))||(n.includes('انستا')&&pick('انستا'))||pick('كاش')||pays[0]}
+ return(pays.includes(n)&&n)||(n.includes('فودافون')&&pick('فودافون'))||(n.includes('انستا')&&pick('انستا'))||pick('كاش')||pays[0]}
 function acceptOrder(id){
  const o=CL.pend.find(x=>x.id==id);if(!o)return;
  if(DB.sales.some(s=>s.onlineId==o.id))return doAccept(id,0,'amt');
@@ -629,6 +630,49 @@ PAGE.settings=()=>{const st=DB.settings,c=st.cloud;
  <p class="mut">المنتجات والمخزون بيترفعوا تلقائيًا مع كل بيع أو تعديل. الصور بترفعها من «تعديل» المنتج.</p></div>
  <div class="card"><h3>المستخدمون والصلاحيات</h3><button class="btn" onclick="userModal()">+ مستخدم</button><div class="tw"><table><tr><th>الاسم</th><th>الدور</th><th>الصلاحيات</th><th>نشط</th><th></th></tr>${DB.users.map(u=>`<tr><td>${esc(u.name)}</td><td>${ROLES[u.role]?ROLES[u.role][0]:'مخصص'}</td><td>${u.role=='manager'?'الكل':u.perms.map(p=>PERMS[p]).join('، ')}</td><td>${u.active?'نعم':'لا'}</td><td><button class="btn s o" onclick="userModal('${u.id}')">تعديل</button></td></tr>`).join('')}</table></div><div class="row" style="margin-top:8px"><button class="btn o" onclick="pinModal()">تغيير رقمي السري</button></div></div>
  <div class="card"><h3>النسخ الاحتياطي والبيانات</h3><p class="mut">آخر نسخة احتياطية: ${st.lastBackup?dt(st.lastBackup):'لم تُؤخذ بعد'}. استخدم نفس الملف لنقل البيانات لجهاز تاني.</p><div class="row"><button class="btn" onclick="backup()">⬇️ نسخة احتياطية</button><label class="btn o" style="margin:0">⬆️ استرجاع نسخة<input type="file" accept=".json" hidden onchange="restore(this)"></label><button class="btn o" onclick="allXlsx()">كل الفواتير Excel</button><button class="btn r" onclick="resetData()">بداية جديدة (مسح الفواتير والمصروفات)</button></div></div>`};
+
+/* ================= تصميم الموقع (لوحة تحكم الصفحة) ================= */
+const SITE_DEF={theme:{rose:'#cf5559',roseD:'#a73a44',tan:'#dcbd86',tanD:'#b38f4e',ink:'#4a2b2d',mut:'#8c6f66',plum:'#7d5a8e',cream:'#f6eed9',paper:'#fcf8ec',hand:'Aref Ruqaa',body:'Tajawal',base:16,h1:64,radius:20,maxw:1180,gridMin:210},
+ text:{heroTitle:'',heroSub:'',cta:'',step1:'',step2:'',step3:'',search:'',closed:'',footer:''},
+ show:{hero:true,steps:true,search:true,sprigs:true,gingham:true},order:['hero','steps','shop'],heroImg:'',
+ counter:{on:false,title:'',endAt:'',endText:'',bg:'#7d5a8e',fg:'#ffffff'},
+ ship:[],freeOver:0,cashOn:true,cashLabel:'',pay:[],gateway:{provider:'',on:false,pub:''},css:'',siteUrl:'https://tetakitchen2-bit.github.io/teta/'};
+const SITE_FONTS=['Tajawal','Cairo','Almarai','Aref Ruqaa','Amiri','Changa','El Messiri','Reem Kufi','Lateef','Harmattan','Noto Kufi Arabic','Markazi Text','Rakkas','Lalezar'];
+function siteCfg(){const s=DB.settings.site||(DB.settings.site={});
+ for(const k in SITE_DEF){const d=SITE_DEF[k];if(s[k]===undefined)s[k]=JSON.parse(JSON.stringify(d));else if(d&&typeof d=='object'&&!Array.isArray(d))s[k]={...d,...s[k]}}
+ return s}
+const sPath=(o,p,v)=>{const a=p.split('.');let c=o;for(let i=0;i<a.length-1;i++){const k=a[i];if(c[k]==null)c[k]=/^\d+$/.test(a[i+1])?[]:{};c=c[k]}c[a[a.length-1]]=v};
+const sIn=(l,p,v,t,x)=>`<div style="flex:1;min-width:140px"><label>${l}</label><input data-p="${p}" type="${t||'text'}" value="${esc(v??'')}" ${x||''}></div>`;
+const sCk=(l,p,v)=>`<label style="display:block;margin:4px 0"><input type="checkbox" data-p="${p}" ${v?'checked':''}> ${l}</label>`;
+const sSel=(l,p,v,o)=>`<div style="flex:1;min-width:140px"><label>${l}</label><select data-p="${p}">${o.map(x=>`<option ${x==v?'selected':''}>${esc(x)}</option>`).join('')}</select></div>`;
+function sPost(){const f=$('#sitePrev');if(f&&f.contentWindow)f.contentWindow.postMessage({tt:'site',site:JSON.parse(JSON.stringify(DB.settings.site))},'*')}
+function siteEvt(e){const el=e.target,p=el.dataset&&el.dataset.p;if(!p)return;
+ const v=el.type=='checkbox'?el.checked:(el.type=='number')?(el.value===''?'':+el.value):el.value;
+ sPath(siteCfg(),p,v);sPost();clearTimeout(siteEvt.t);siteEvt.t=setTimeout(()=>saveLocal('settings'),500)}
+const siteRe=()=>{const y=scrollY;go('site');scrollTo(0,y)};
+function siteAdd(k,pre){const s=siteCfg();s[k].push(k=='ship'?{name:'',fee:0,eta:'',areas:'',active:true}:{icon:'💳',name:'',number:'',note:'',transfer:true,active:true,...(pre||{})});saveLocal('settings');siteRe()}
+function siteDel(k,i){siteCfg()[k].splice(i,1);saveLocal('settings');siteRe()}
+function siteMove(i,d){const o=siteCfg().order,j=i+d;if(j<0||j>=o.length)return;[o[i],o[j]]=[o[j],o[i]];saveLocal('settings');siteRe()}
+function siteReset(){if(!confirm('إعادة كل إعدادات التصميم للوضع الافتراضي؟'))return;DB.settings.site={};saveLocal('settings');siteRe()}
+async function siteSave(){saveLocal('settings');save('settings');await pushSettings(true)}
+PAGE.site=()=>{const s=siteCfg(),t=s.theme,x=s.text,sh=s.show,c=s.counter,g=s.gateway;
+ const col=(l,k)=>sIn(l,'theme.'+k,t[k],'color','style="height:38px;padding:2px"');
+ const num=(l,p,v,a,b)=>sIn(l,p,v,'number',`min="${a}" max="${b}"`);
+ const NM={hero:'الهيرو (اللوجو والعنوان)',steps:'خطوات الطلب',shop:'المنتجات'};
+ const row=h=>`<div class="row">${h}</div>`;
+ $('#main').innerHTML=`<div class="card"><div class="row"><button class="btn" onclick="siteSave()">🚀 نشر على الموقع</button><a class="btn o" href="${esc(s.siteUrl)}" target="_blank">فتح الموقع</a><button class="btn r" onclick="siteReset()">إعادة الضبط</button></div><p class="mut">التعديلات بتظهر فورًا في المعاينة، ولا تظهر للزوار إلا بعد «نشر على الموقع». (لازم تكون مربوط بالموقع من الإعدادات.)</p>${sIn('رابط الموقع للمعاينة','siteUrl',s.siteUrl,'text','dir="ltr"')}</div>
+ <div class="row" style="align-items:flex-start"><div style="flex:1 1 460px;min-width:0">
+ <div class="card"><h3>⏳ العداد التنازلي (للعروض المحدودة)</h3>${sCk('تشغيل العداد','counter.on',c.on)}${sIn('الكلام اللي فوق العداد (سبب العداد)','counter.title',c.title)}${row(sIn('ينتهي في','counter.endAt',c.endAt,'datetime-local')+sIn('رسالة بعد الانتهاء (اختياري، فاضي = يختفي)','counter.endText',c.endText))}${row(sIn('لون الخلفية','counter.bg',c.bg,'color','style="height:38px;padding:2px"')+sIn('لون الكتابة','counter.fg',c.fg,'color','style="height:38px;padding:2px"'))}</div>
+ <div class="card"><h3>🎨 الألوان</h3>${row(col('الأساسي','rose')+col('الأساسي (داكن)','roseD')+col('الإطارات','tan')+col('الإطارات (داكن)','tanD'))}${row(col('لون النص','ink')+col('نص ثانوي','mut')+col('لون مميز (الخصم)','plum')+col('خلفية الصفحة','cream')+col('خلفية الكروت','paper'))}</div>
+ <div class="card"><h3>🔤 الخطوط والأحجام</h3>${row(sSel('خط العناوين','theme.hand',t.hand,SITE_FONTS)+sSel('خط النصوص','theme.body',t.body,SITE_FONTS))}${row(num('حجم النص الأساسي (px)','theme.base',t.base,12,24)+num('حجم العنوان الرئيسي (px)','theme.h1',t.h1,30,120)+num('استدارة الحواف (px)','theme.radius',t.radius,0,40)+num('أقصى عرض للصفحة (px)','theme.maxw',t.maxw,700,1600)+num('أقل عرض لكارت المنتج (px)','theme.gridMin',t.gridMin,140,360))}</div>
+ <div class="card"><h3>✏️ النصوص (فاضي = النص الأصلي)</h3>${sIn('العنوان الرئيسي','text.heroTitle',x.heroTitle)}${sIn('الوصف تحت العنوان','text.heroSub',x.heroSub)}${row(sIn('زرار الطلب','text.cta',x.cta)+sIn('خانة البحث','text.search',x.search))}${row(sIn('الخطوة ١','text.step1',x.step1)+sIn('الخطوة ٢','text.step2',x.step2)+sIn('الخطوة ٣','text.step3',x.step3))}${sIn('رسالة إيقاف الطلبات','text.closed',x.closed)}${sIn('سطر الفوتر','text.footer',x.footer)}${sIn('رابط صورة الهيرو (فاضي = اللوجو)','heroImg',s.heroImg,'text','dir="ltr"')}</div>
+ <div class="card"><h3>🧩 الأقسام وترتيبها</h3>${sCk('الهيرو','show.hero',sh.hero)}${sCk('خطوات الطلب','show.steps',sh.steps)}${sCk('خانة البحث','show.search',sh.search)}${sCk('زخرفة النباتات','show.sprigs',sh.sprigs)}${sCk('شريط الجينجهام','show.gingham',sh.gingham)}<label>الترتيب</label>${s.order.map((k,i)=>`<div class="row"><b style="flex:1">${NM[k]}</b><button class="btn s o" onclick="siteMove(${i},-1)">↑</button><button class="btn s o" onclick="siteMove(${i},1)">↓</button></div>`).join('')}</div>
+ <div class="card"><h3>🚚 شركات الشحن</h3><p class="mut">لو ضفت شركة، العميل بيختار منها وسعرها بيحل محل «مصاريف التوصيل» العامة. أسعار المناطق: سطر لكل منطقة بالشكل <b>القاهرة=40</b>.</p>${sIn('شحن مجاني للطلبات فوق (ج) — 0 = متوقف','freeOver',s.freeOver,'number','min="0"')}${s.ship.map((m,i)=>`<div class="card" style="background:#0000000a">${row(sIn('اسم الشركة','ship.'+i+'.name',m.name)+sIn('السعر الأساسي (ج)','ship.'+i+'.fee',m.fee,'number','min="0"')+sIn('مدة التوصيل','ship.'+i+'.eta',m.eta))}<label>أسعار حسب المنطقة/المحافظة</label><textarea data-p="ship.${i}.areas" rows="3" dir="rtl">${esc(m.areas||'')}</textarea>${sCk('مفعّلة','ship.'+i+'.active',m.active!==false)}<button class="btn s r" onclick="siteDel('ship',${i})">حذف</button></div>`).join('')}<button class="btn o" onclick="siteAdd('ship')">+ شركة شحن</button></div>
+ <div class="card"><h3>💳 طرق الدفع</h3><p class="mut">لو ضفت طرق هنا بتحل محل خانات فودافون كاش/إنستا باي القديمة. «يحتاج تحويل» يعني العميل لازم يكتب رقم العملية أو يرفع صورة.</p>${sCk('كاش عند الاستلام','cashOn',s.cashOn)}${s.pay.map((m,i)=>`<div class="card" style="background:#0000000a">${row(sIn('أيقونة','pay.'+i+'.icon',m.icon)+sIn('الاسم','pay.'+i+'.name',m.name)+sIn('الرقم / العنوان','pay.'+i+'.number',m.number,'text','dir="ltr"'))}${sIn('تعليمات للعميل (اختياري)','pay.'+i+'.note',m.note)}${sCk('يحتاج تحويل ورقم عملية','pay.'+i+'.transfer',m.transfer!==false)}${sCk('مفعّلة','pay.'+i+'.active',m.active!==false)}<button class="btn s r" onclick="siteDel('pay',${i})">حذف</button></div>`).join('')}<div class="row"><button class="btn o" onclick="siteAdd('pay',{icon:'📱',name:'فودافون كاش'})">+ فودافون كاش</button><button class="btn o" onclick="siteAdd('pay',{icon:'🏦',name:'انستاباي'})">+ إنستا باي</button><button class="btn o" onclick="siteAdd('pay')">+ طريقة أخرى</button></div>
+ <h3 style="margin-top:14px">🔌 الدفع الأونلاين (مجهّز للربط لاحقًا)</h3><p class="mut">مكان محفوظ فقط دلوقتي — التفعيل الحقيقي (Paymob / Fawry) هيحتاج سيرفر. ⚠️ ماتكتبش هنا أي مفتاح سري (Secret)، لأن الإعدادات دي عامة.</p>${row(sSel('المزوّد','gateway.provider',g.provider,['','Paymob','Fawry','Kashier','أخرى'])+sIn('المفتاح العام (Public)','gateway.pub',g.pub,'text','dir="ltr"'))}${sCk('تفعيل (لما الربط يجهز)','gateway.on',g.on)}</div>
+ <div class="card"><h3>🧪 CSS مخصص (متقدم)</h3><p class="mut">بيتطبق فوق كل التصميم. مثال: <span dir="ltr">.pc{box-shadow:none}</span></p><textarea data-p="css" rows="8" dir="ltr" style="font-family:monospace">${esc(s.css)}</textarea></div>
+ </div><div style="flex:1 1 360px;min-width:0;position:sticky;top:56px"><iframe id="sitePrev" src="${esc(s.siteUrl)}" onload="sPost()" style="width:100%;height:82vh;border:2px solid #ccc;border-radius:12px;background:#fff"></iframe></div></div>`;
+ const m=$('#main');m.oninput=m.onchange=siteEvt};
 async function cloudConnect(){
  const c=cfg();c.url=val('c_url');c.key=val('c_key');c.email=val('c_email');const pw=$('#c_pw').value;
  if(!pw&&c.rt){save('settings');return toast('محفوظ')}
