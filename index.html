@@ -77,6 +77,8 @@ header{position:sticky;top:0;z-index:30;background:var(--paper);border-bottom:2p
 .pc .bt{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 4px 2px}
 .price{font-family:var(--hand);font-size:25px;color:var(--rose-d);font-weight:700;white-space:nowrap}
 .price small{font-family:var(--body);font-size:13px;color:var(--mut);font-weight:500}
+.price s.old{font-family:var(--body);font-size:14px;color:var(--mut);font-weight:500;margin-inline-end:4px}
+.dbadge{position:absolute;top:8px;right:8px;z-index:2;background:var(--plum);color:#fff;font-weight:800;font-size:13px;padding:3px 12px;border-radius:999px;box-shadow:0 2px 0 #5b4068;transform:rotate(-3deg)}
 .add{background:var(--rose);color:#fff;border:0;border-radius:999px;padding:7px 14px;cursor:pointer;font-weight:700;box-shadow:0 3px 0 var(--rose-d);position:relative;z-index:1}
 .add:active{transform:translateY(2px);box-shadow:0 1px 0 var(--rose-d)}
 .add[disabled]{background:#c9b9a8;box-shadow:0 3px 0 #a99884;cursor:not-allowed}
@@ -258,9 +260,9 @@ function drawProducts(){
 function card(p){
   const out=p.in_stock===false;
   return `<article class="pc">${out?'<span class="soldout">خلصت</span>':''}
-  <div class="ph"><div class="ph0">${JAR}<span>صورة المنتج</span></div>${p.image_url?`<img src="${esc(p.image_url)}" alt="${esc(p.name)}" loading="lazy" onerror="this.remove()">`:''}</div>
+  <div class="ph">${p.old_price>p.price?`<span class="dbadge">خصم ${Math.round(+p.discount||(1-p.price/p.old_price)*100)}%</span>`:''}<div class="ph0">${JAR}<span>صورة المنتج</span></div>${p.image_url?`<img src="${esc(p.image_url)}" alt="${esc(p.name)}" loading="lazy" onerror="this.remove()">`:''}</div>
   <div class="nm">${esc(p.name)}</div><div class="sz">${esc(p.size||'')}</div>
-  <div class="bt"><div class="price">${n2(p.price)} <small>ج</small></div><div id="c-${p.code}">${ctl(p)}</div></div></article>`}
+  <div class="bt"><div class="price">${p.old_price>p.price?`<s class="old">${n2(p.old_price)}</s>`:''}${n2(p.price)} <small>ج</small></div><div id="c-${p.code}">${ctl(p)}</div></div></article>`}
 function ctl(p){
   if(p.in_stock===false)return '<button class="add" disabled>غير متاح</button>';
   const q=S.cart[p.code]||0;
