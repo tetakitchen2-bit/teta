@@ -132,7 +132,7 @@ const PAGES=[['pos','🛒 البيع'],['orders','🌐 طلبات الموقع']
 const DEF_SET={shopName:'تيتة',phone:'',address:'',footer:'شكراً لتعاملكم مع تيتة',logo:'',paper:'80',autoPrint:false,cc:'20',lowStock:5,nextInvoice:1,lastBackup:0,
  pays:['كاش','فودافون كاش','انستاباي','فيزا'],sources:['زيارة المحل','انستجرام','فيسبوك','تيك توك','واتساب','ترشيح من صديق','موقع تيتة'],expCats:['مواد خام','تغليف','رواتب','إيجار','مواصلات','تسويق','أخرى'],
  cloud:{url:'https://xvhdxtnixtdtzicrddlt.supabase.co',key:'sb_publishable__riAVMylXV233y6kwbs_sw_DB6sGqyC',email:'tetakitchen2@gmail.com',rt:''},
- whatsapp:'',vcash:'',instapay:'',deliveryFee:0,minOrder:0,accepting:true,logoUp:''};
+ whatsapp:'',vcash:'',instapay:'',minOrder:0,accepting:true,logoUp:''};
 const SEED=`P01|مربي مانجو بدون سكر|200 جرام|95|66
 P02|مربي مانجو بدون سكر|340 جرام|185|130
 P03|مربي تين بدون سكر|200 جرام|95|66
@@ -281,7 +281,7 @@ async function pushSettings(manual){
    const cv=document.createElement('canvas');cv.width=im.width;cv.height=im.height;const x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,cv.width,cv.height);x.drawImage(im,0,0);
    const jb=await new Promise(ok=>cv.toBlob(ok,'image/jpeg',.9));
    st.logoUrl=await uploadImg('logo.jpg',jb);st.logoUp=hash(st.logo);save('settings')}
-  const row={id:1,shop_name:st.shopName,phone:st.phone,address:st.address,footer:st.footer,logo_url:st.logoUrl||null,whatsapp:st.whatsapp,vcash:st.vcash,instapay:st.instapay,delivery_fee:+st.deliveryFee||0,min_order:+st.minOrder||0,accepting:st.accepting!==false,site:st.site||{}};
+  const row={id:1,shop_name:st.shopName,phone:st.phone,address:st.address,footer:st.footer,logo_url:st.logoUrl||null,whatsapp:st.whatsapp,vcash:st.vcash,instapay:st.instapay,delivery_fee:0,min_order:+st.minOrder||0,accepting:st.accepting!==false,site:st.site||{}};
   const up=r=>cApi('/rest/v1/shop_settings?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify([r])});
   try{await up(row)}catch(e){if(/site/i.test(e.message)){delete row.site;await up(row);return manual&&toast('اتحفظت الإعدادات لكن التصميم لم يُرفع: شغّل ملف supabase-site.sql مرة واحدة')}throw e}
   manual&&toast('تم رفع الإعدادات للموقع ✔')
@@ -291,7 +291,7 @@ async function fetchOrders(quiet){
  if(!cloudOn()||!S.user||!can('orders'))return;
  try{
   const l=await cApi('/rest/v1/orders?status=eq.pending&order=created_at.asc');
-  CL.pend=l||[];CL.err='';
+  CL.pend=(l||[]).map(o=>{const note=String(o.notes||o.p_notes||'');const m=note.match(/منطقة التوصيل:\s*.+?—\s*([0-9]+(?:[.٫,][0-9]+)?)\s*ج/);if(m)o.delivery=+(m[1].replace(',','.').replace('٫','.'))||0;o.total=Math.round(((+o.subtotal||0)+(+o.delivery||0))*100)/100;return o});CL.err='';
   const ids=new Set(CL.pend.map(o=>o.id));
   if(CL.seen){const fresh=CL.pend.filter(o=>!CL.seen.has(o.id));if(fresh.length){beep();toast('🔔 طلب جديد من الموقع! ('+fresh.length+')')}}
   CL.seen=ids;
@@ -636,24 +636,26 @@ const SITE_DEF={theme:{rose:'#cf5559',roseD:'#a73a44',tan:'#dcbd86',tanD:'#b38f4
  text:{heroTitle:'',heroSub:'',cta:'',step1:'',step2:'',step3:'',search:'',closed:'',footer:''},
  show:{hero:true,steps:true,search:true,sprigs:true,gingham:true},order:['hero','steps','shop'],heroImg:'',
  counter:{on:false,title:'',endAt:'',endText:'',bg:'#7d5a8e',fg:'#ffffff'},
- ship:[],freeOver:0,cashOn:true,cashLabel:'',pay:[],gateway:{provider:'',on:false,pub:''},css:'',siteUrl:'https://tetakitchen2-bit.github.io/teta/'};
+ deliveryAreas:[],deliveryEta:'',freeOver:0,cashOn:true,cashLabel:'',pay:[],gateway:{provider:'',on:false,pub:''},css:'',siteUrl:'https://tetakitchen2-bit.github.io/teta/'};
 const SITE_FONTS=['Tajawal','Cairo','Almarai','Aref Ruqaa','Amiri','Changa','El Messiri','Reem Kufi','Lateef','Harmattan','Noto Kufi Arabic','Markazi Text','Rakkas','Lalezar'];
 function siteCfg(){const s=DB.settings.site||(DB.settings.site={});
  for(const k in SITE_DEF){const d=SITE_DEF[k];if(s[k]===undefined)s[k]=JSON.parse(JSON.stringify(d));else if(d&&typeof d=='object'&&!Array.isArray(d))s[k]={...d,...s[k]}}
+ // إدارة مناطق التوصيل مستقلة تمامًا عن شركات الشحن.
+ delete s.ship;
+ if(!Array.isArray(s.deliveryAreas))s.deliveryAreas=[];
  return s}
 const sPath=(o,p,v)=>{const a=p.split('.');let c=o;for(let i=0;i<a.length-1;i++){const k=a[i];if(c[k]==null)c[k]=/^\d+$/.test(a[i+1])?[]:{};c=c[k]}c[a[a.length-1]]=v};
 const sIn=(l,p,v,t,x)=>`<div style="flex:1;min-width:140px"><label>${l}</label><input data-p="${p}" type="${t||'text'}" value="${esc(v??'')}" ${x||''}></div>`;
 const sCk=(l,p,v)=>`<label style="display:block;margin:4px 0"><input type="checkbox" data-p="${p}" ${v?'checked':''}> ${l}</label>`;
 const sSel=(l,p,v,o)=>`<div style="flex:1;min-width:140px"><label>${l}</label><select data-p="${p}">${o.map(x=>`<option ${x==v?'selected':''}>${esc(x)}</option>`).join('')}</select></div>`;
 function sPost(){const f=$('#sitePrev');if(f&&f.contentWindow)f.contentWindow.postMessage({tt:'site',site:JSON.parse(JSON.stringify(DB.settings.site))},'*')}
-function siteEvt(e){const el=e.target;if(el.dataset&&(el.dataset.areaName!==undefined||el.dataset.areaFee!==undefined)){const i=+(el.dataset.areaName||el.dataset.areaFee).split('-')[0];siteCfg().ship[i].areas=siteAreasRead(i);sPost();clearTimeout(siteEvt.t);siteEvt.t=setTimeout(()=>saveLocal('settings'),500);return}const p=el.dataset&&el.dataset.p;if(!p)return;
+function siteEvt(e){const el=e.target;if(el.dataset&&el.dataset.deliveryArea!==undefined){const i=+el.dataset.deliveryArea,field=el.dataset.field;siteCfg().deliveryAreas[i][field]=field==='fee'?(el.value===''?'':+el.value):el.value;sPost();clearTimeout(siteEvt.t);siteEvt.t=setTimeout(()=>saveLocal('settings'),500);return}const p=el.dataset&&el.dataset.p;if(!p)return;
  const v=el.type=='checkbox'?el.checked:(el.type=='number')?(el.value===''?'':+el.value):el.value;
  sPath(siteCfg(),p,v);sPost();clearTimeout(siteEvt.t);siteEvt.t=setTimeout(()=>saveLocal('settings'),500)}
 const siteRe=()=>{const y=scrollY;go('site');scrollTo(0,y)};
-function siteAdd(k,pre){const s=siteCfg();s[k].push(k=='ship'?{name:'',fee:0,eta:'',areas:'',active:true}:{icon:'💳',name:'',number:'',note:'',transfer:true,active:true,...(pre||{})});saveLocal('settings');siteRe()}
-function siteAreasRead(i){const root=$('#main');const rows=[...root.querySelectorAll(`[data-area-name^="${i}-"]`)];return rows.map(el=>{const j=el.dataset.areaName.split('-')[1],fee=root.querySelector(`[data-area-fee="${i}-${j}"]`);return (el.value.trim()&&fee&&fee.value.trim()!=='')?el.value.trim()+'='+fee.value.trim():''}).filter(Boolean).join('\\n')}
-function siteAreaAdd(i){const m=siteCfg().ship[i];m.areas=siteAreasRead(i);m.areas+=(m.areas?'\\n':'')+'منطقة جديدة=0';saveLocal('settings');siteRe()}
-function siteAreaDel(i,j){const m=siteCfg().ship[i],lines=String(m.areas||'').split('\\n');lines.splice(j,1);m.areas=lines.filter(Boolean).join('\\n');saveLocal('settings');siteRe()}
+function siteAdd(k,pre){const s=siteCfg();s[k].push({icon:'💳',name:'',number:'',note:'',transfer:true,active:true,...(pre||{})});saveLocal('settings');siteRe()}
+function siteAreaAdd(){siteCfg().deliveryAreas.push({name:'',fee:0});saveLocal('settings');siteRe()}
+function siteAreaDel(i){siteCfg().deliveryAreas.splice(i,1);saveLocal('settings');siteRe()}
 function siteDel(k,i){siteCfg()[k].splice(i,1);saveLocal('settings');siteRe()}
 function siteMove(i,d){const o=siteCfg().order,j=i+d;if(j<0||j>=o.length)return;[o[i],o[j]]=[o[j],o[i]];saveLocal('settings');siteRe()}
 function siteReset(){if(!confirm('إعادة كل إعدادات التصميم للوضع الافتراضي؟'))return;DB.settings.site={};saveLocal('settings');siteRe()}
@@ -670,7 +672,8 @@ PAGE.site=()=>{const s=siteCfg(),t=s.theme,x=s.text,sh=s.show,c=s.counter,g=s.ga
  <div class="card"><h3>🔤 الخطوط والأحجام</h3>${row(sSel('خط العناوين','theme.hand',t.hand,SITE_FONTS)+sSel('خط النصوص','theme.body',t.body,SITE_FONTS))}${row(num('حجم النص الأساسي (px)','theme.base',t.base,12,24)+num('حجم العنوان الرئيسي (px)','theme.h1',t.h1,30,120)+num('استدارة الحواف (px)','theme.radius',t.radius,0,40)+num('أقصى عرض للصفحة (px)','theme.maxw',t.maxw,700,1600)+num('أقل عرض لكارت المنتج (px)','theme.gridMin',t.gridMin,140,360))}</div>
  <div class="card"><h3>✏️ النصوص (فاضي = النص الأصلي)</h3>${sIn('العنوان الرئيسي','text.heroTitle',x.heroTitle)}${sIn('الوصف تحت العنوان','text.heroSub',x.heroSub)}${row(sIn('زرار الطلب','text.cta',x.cta)+sIn('خانة البحث','text.search',x.search))}${row(sIn('الخطوة ١','text.step1',x.step1)+sIn('الخطوة ٢','text.step2',x.step2)+sIn('الخطوة ٣','text.step3',x.step3))}${sIn('رسالة إيقاف الطلبات','text.closed',x.closed)}${sIn('سطر الفوتر','text.footer',x.footer)}${sIn('رابط صورة الهيرو (فاضي = اللوجو)','heroImg',s.heroImg,'text','dir="ltr"')}</div>
  <div class="card"><h3>🧩 الأقسام وترتيبها</h3>${sCk('الهيرو','show.hero',sh.hero)}${sCk('خطوات الطلب','show.steps',sh.steps)}${sCk('خانة البحث','show.search',sh.search)}${sCk('زخرفة النباتات','show.sprigs',sh.sprigs)}${sCk('شريط الجينجهام','show.gingham',sh.gingham)}<label>الترتيب</label>${s.order.map((k,i)=>`<div class="row"><b style="flex:1">${NM[k]}</b><button class="btn s o" onclick="siteMove(${i},-1)">↑</button><button class="btn s o" onclick="siteMove(${i},1)">↓</button></div>`).join('')}</div>
- <div class="card"><h3>🚚 شركات الشحن</h3><p class="mut">أضف شركة الشحن ومدة التوصيل المتوقعة، ثم أضف المناطق وسعر كل منطقة. العميل سيختار المنطقة من قائمة منسدلة عند الطلب.</p>${sIn('شحن مجاني للطلبات فوق (ج) — 0 = متوقف','freeOver',s.freeOver,'number','min="0"')}${s.ship.map((m,i)=>`<div class="card" style="background:#0000000a">${row(sIn('اسم الشركة','ship.'+i+'.name',m.name)+sIn('السعر الأساسي (ج)','ship.'+i+'.fee',m.fee,'number','min="0"')+sIn('مدة التوصيل','ship.'+i+'.eta',m.eta))}<label>المناطق وأسعار التوصيل</label><div>${(String(m.areas||'').split('\\n').filter(Boolean).length?String(m.areas||'').split('\\n').map(ln=>{const j=ln.lastIndexOf('=');return {name:j>0?ln.slice(0,j):ln,fee:j>0?ln.slice(j+1):''}}):[{name:'',fee:''}]).map((a,j)=>`<div class="row"><input placeholder="اسم المنطقة" data-area-name="${i}-${j}" value="${esc(a.name)}"><input type="number" min="0" placeholder="السعر بالجنيه" data-area-fee="${i}-${j}" value="${esc(a.fee)}"><button class="btn s r" onclick="siteAreaDel(${i},${j})">حذف</button></div>`).join('')}</div><button class="btn s o" onclick="siteAreaAdd(${i})">+ إضافة منطقة</button>${sCk('مفعّلة','ship.'+i+'.active',m.active!==false)}<button class="btn s r" onclick="siteDel('ship',${i})">حذف</button></div>`).join('')}<button class="btn o" onclick="siteAdd('ship')">+ شركة شحن</button></div>
+ <div class="card"><h3>🚚 إعدادات التوصيل</h3><p class="mut">أضف اسم كل منطقة وسعر التوصيل بالجنيه. العميل سيختار المنطقة أثناء الطلب وسيظهر السعر تلقائيًا.</p>${sIn('مدة التوصيل المتوقعة','deliveryEta',s.deliveryEta||'')}
+ <label style="display:block;margin-top:10px">مناطق التوصيل وأسعارها</label>${(s.deliveryAreas||[]).map((a,i)=>`<div class="row" style="margin:8px 0"><input placeholder="اسم المنطقة" data-delivery-area="${i}" data-field="name" value="${esc(a.name||'')}" style="flex:2;min-width:120px"><input type="number" min="0" placeholder="السعر بالجنيه" data-delivery-area="${i}" data-field="fee" value="${esc(a.fee??0)}" style="flex:1;min-width:100px"><button class="btn s r" onclick="siteAreaDel(${i})">حذف</button></div>`).join('')}<button class="btn o" onclick="siteAreaAdd()">+ إضافة منطقة</button></div>
  <div class="card"><h3>💳 طرق الدفع</h3><p class="mut">لو ضفت طرق هنا بتحل محل خانات فودافون كاش/إنستا باي القديمة. «يحتاج تحويل» يعني العميل لازم يكتب رقم العملية أو يرفع صورة.</p>${sCk('كاش عند الاستلام','cashOn',s.cashOn)}${s.pay.map((m,i)=>`<div class="card" style="background:#0000000a">${row(sIn('أيقونة','pay.'+i+'.icon',m.icon)+sIn('الاسم','pay.'+i+'.name',m.name)+sIn('الرقم / العنوان','pay.'+i+'.number',m.number,'text','dir="ltr"'))}${sIn('تعليمات للعميل (اختياري)','pay.'+i+'.note',m.note)}${sCk('يحتاج تحويل ورقم عملية','pay.'+i+'.transfer',m.transfer!==false)}${sCk('مفعّلة','pay.'+i+'.active',m.active!==false)}<button class="btn s r" onclick="siteDel('pay',${i})">حذف</button></div>`).join('')}<div class="row"><button class="btn o" onclick="siteAdd('pay',{icon:'📱',name:'فودافون كاش'})">+ فودافون كاش</button><button class="btn o" onclick="siteAdd('pay',{icon:'🏦',name:'انستاباي'})">+ إنستا باي</button><button class="btn o" onclick="siteAdd('pay')">+ طريقة أخرى</button></div>
  <h3 style="margin-top:14px">🔌 الدفع الأونلاين (مجهّز للربط لاحقًا)</h3><p class="mut">مكان محفوظ فقط دلوقتي — التفعيل الحقيقي (Paymob / Fawry) هيحتاج سيرفر. ⚠️ ماتكتبش هنا أي مفتاح سري (Secret)، لأن الإعدادات دي عامة.</p>${row(sSel('المزوّد','gateway.provider',g.provider,['','Paymob','Fawry','Kashier','أخرى'])+sIn('المفتاح العام (Public)','gateway.pub',g.pub,'text','dir="ltr"'))}${sCk('تفعيل (لما الربط يجهز)','gateway.on',g.on)}</div>
  <div class="card"><h3>🧪 CSS مخصص (متقدم)</h3><p class="mut">بيتطبق فوق كل التصميم. مثال: <span dir="ltr">.pc{box-shadow:none}</span></p><textarea data-p="css" rows="8" dir="ltr" style="font-family:monospace">${esc(s.css)}</textarea></div>
