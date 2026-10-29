@@ -49,7 +49,7 @@ header{position:sticky;top:0;z-index:30;background:var(--paper);border-bottom:2p
 .sprig.l{left:6px}.sprig.r{right:6px;transform:scaleX(-1)}
 @media(max-width:560px){.sprig{width:46px;top:40px}}
 
-.steps{max-width:900px;margin:26px auto 6px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:0 14px}
+.steps{max-width:900px;margin:26px auto 6px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:0 14px}
 .step{background:var(--paper);border:2px dashed var(--tan-d);border-radius:16px;padding:10px 8px;text-align:center;font-size:14.5px}
 .step i{display:grid;place-items:center;width:34px;height:34px;margin:0 auto 4px;border-radius:50%;background:var(--rose);color:#fff;font-style:normal;font-weight:800}
 
@@ -64,7 +64,7 @@ header{position:sticky;top:0;z-index:30;background:var(--paper);border-bottom:2p
 .sec h2{font-family:var(--hand);color:var(--rose-d);font-size:32px;margin:26px 0 12px;display:flex;align-items:center;gap:12px}
 .sec h2::after{content:"";flex:1;height:10px;background:repeating-linear-gradient(90deg,var(--tan) 0 8px,transparent 8px 14px);border-radius:6px;opacity:.8}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:18px}
-@media(max-width:520px){.grid{grid-template-columns:repeat(2,1fr);gap:12px}}
+@media(max-width:520px){.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}}
 .pc{position:relative;background:var(--paper);border:2px solid var(--tan);border-radius:20px;padding:12px;display:flex;flex-direction:column;box-shadow:0 5px 0 #dcbd8666,0 8px 14px #7a4a2a14;transition:transform .15s}
 .pc:hover{transform:translateY(-3px) rotate(-.4deg)}
 .pc::after{content:"";position:absolute;inset:5px;border:1.5px dashed #b38f4e80;border-radius:15px;pointer-events:none}
@@ -164,6 +164,25 @@ footer .cr{font-size:13px;margin-top:12px;opacity:.85}
 .opt{border:2px solid var(--tan);background:#fff;border-radius:999px;padding:7px 16px;font:inherit;cursor:pointer}
 .opt.on{background:var(--rose);border-color:var(--rose);color:#fff}
 .btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* ---------- منع الإزاحة الأفقية على الموبايل والكمبيوتر ---------- */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;max-width:100%;overflow-x:clip}
+body{max-width:100%;overflow-x:clip;overflow-wrap:break-word}
+@supports not (overflow-x:clip){body{overflow-x:hidden}}
+img,svg,video,canvas{max-width:100%}
+.hd>*,.hero,.steps>*,.pc,.li .tx{min-width:0}
+.grid>*,.sec{min-width:0}
+.pc .nm,.pc .sz,.li .tx b{overflow-wrap:anywhere}
+input,select,textarea,.in,.tools input{font-size:16px!important;max-width:100%}
+#cdBar .cu span{min-width:0;flex:1;max-width:84px;padding:4px 6px}
+
+/* كارت المنتج: السعر والزرار ما يخرجوش بره الكارت */
+.bt{flex-wrap:wrap;row-gap:8px}
+.bt>div{min-width:0}
+.price{white-space:normal}
+.add{white-space:normal;max-width:100%}
+@media(max-width:520px){.pc .bt{flex-direction:column;align-items:stretch;text-align:center}.pc .bt .add,.pc .bt .stp{width:100%;justify-content:center}.price{font-size:21px}}
 </style>
 </head>
 <body>
