@@ -152,6 +152,18 @@ footer .cr{font-size:13px;margin-top:12px;opacity:.85}
 .soc{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:10px 0}
 .soc a{background:#fff;border:2px solid var(--tan);border-radius:999px;padding:5px 16px;text-decoration:none;font-weight:700;color:var(--rose-d)}
 #waFab{display:none;position:fixed;left:14px;bottom:88px;z-index:24;width:54px;height:54px;border-radius:50%;background:#2e9e57;color:#fff;font-size:28px;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 4px 12px #0004}
+/* ---------- نافذة المنتج والاختيارات ---------- */
+#pm{position:fixed;inset:0;background:#0006;z-index:60;display:none;align-items:flex-end;justify-content:center}
+#pm.show{display:flex}
+.pms{background:var(--paper);width:100%;max-width:520px;max-height:90vh;overflow:auto;border-radius:20px 20px 0 0;padding:18px;position:relative}
+.pms .px{position:absolute;top:10px;left:10px;border:0;background:#0001;border-radius:50%;width:32px;height:32px;font-size:16px;cursor:pointer}
+.pmi{width:100%;max-height:260px;object-fit:cover;border-radius:14px;margin-bottom:10px}
+.pmd{line-height:1.8;color:var(--mut)}
+.og{margin:12px 0}.og i{color:var(--rose);font-style:normal}
+.oc{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.opt{border:2px solid var(--tan);background:#fff;border-radius:999px;padding:7px 16px;font:inherit;cursor:pointer}
+.opt.on{background:var(--rose);border-color:var(--rose);color:#fff}
+.btn:disabled{opacity:.5;cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -202,6 +214,7 @@ footer .cr{font-size:13px;margin-top:12px;opacity:.85}
   </div>
 </footer>
 
+<div id="pm" onclick="if(event.target===this)closeProd()"><div class="pms" id="pmBody"></div></div>
 <a id="waFab" href="#" target="_blank" rel="noopener" aria-label="واتساب" onclick="track('Contact')">💬</a>
 <div class="bar" id="bar" onclick="openCart()"><span id="barT">🧺 السلة</span><span id="barP"></span></div>
 <div class="ov" id="ov" onclick="closeCart()"></div>
@@ -226,7 +239,7 @@ function toast(m){const t=$('#toast');t.textContent=m;t.className='show';clearTi
 const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
 
-const S={products:[],shop:{shop_name:'تيتة',min_order:0,accepting:true},cart:lsGet('tt_cart',{}),cat:'',q:'',view:'cart',pay:'cash',busy:false,err:'',done:null,
+const S={products:[],shop:{shop_name:'تيتة',min_order:0,accepting:true},cart:lsGet('tt_cart',{}),opts:lsGet('tt_opts',{}),pm:null,cat:'',q:'',view:'cart',pay:'cash',busy:false,err:'',done:null,
   f:lsGet('tt_cust',{name:'',phone:'',area:'',address:'',notes:'',ref:''})};
 const prod=c=>S.products.find(p=>p.code===c);
 const saveCart=()=>lsSet('tt_cart',S.cart);
@@ -357,6 +370,53 @@ function drawSocial(){
   $('#fSoc').innerHTML=L.join('');
   const f=$('#waFab');f.style.display=(w&&st.fab===true)?'flex':'none';if(w)f.href=w}
 
+/* ====== عروض الخصم التلقائية (من لوحة التحكم) — خصم واحد بس، محسوب على السعر قبل خصم المنتج ====== */
+/*PROMO_START*/
+const counterOn=()=>{const c=SITE().counter||{},e=c.endAt?new Date(c.endAt).getTime():0;return !!c.on&&e>Date.now()};
+const promoActive=pr=>pr&&pr.on!==false&&(pr.withCounter===false||counterOn());
+const origPrice=p=>+p.old_price>+p.price?+p.old_price:+p.price;
+function promoCalc(){
+  const its=items();if(!its.length)return null;let best=null;
+  for(const pr of (SITE().promos||[]).filter(promoActive)){
+    const sel=its.filter(x=>pr.all!==false||(pr.codes||[]).includes(x.p.code));
+    if(sel.reduce((a,x)=>a+x.q,0)<(+pr.minQty||1))continue;
+    const orig=sel.reduce((a,x)=>a+origPrice(x.p)*x.q,0),cur=sel.reduce((a,x)=>a+x.p.price*x.q,0);
+    const after=pr.type=='egp'?Math.max(0,orig-(+pr.value||0)):orig*(1-(+pr.value||0)/100);
+    const d=Math.round((cur-after)*100)/100;
+    if(d>0&&(!best||d>best.d))best={name:pr.name||'عرض خاص',d,pr}}
+  return best}
+const promoD=()=>(promoCalc()||{d:0}).d;
+const netTot=()=>Math.round((sub()-promoD()+delivery())*100)/100;
+function promoHint(){
+  const its=items();
+  for(const pr of (SITE().promos||[]).filter(promoActive)){
+    const q=its.filter(x=>pr.all!==false||(pr.codes||[]).includes(x.p.code)).reduce((a,x)=>a+x.q,0),m=+pr.minQty||1;
+    if(q>0&&q<m)return `<div class="note">🏷️ ضيف ${m-q} منتج كمان وخد خصم ${pr.type=='egp'?n2(+pr.value)+' ج':(+pr.value)+'%'}${pr.name?' ('+esc(pr.name)+')':''}</div>`}
+  return ''}
+const promoNote=()=>{const pc=promoCalc();return pc?'خصم العرض: '+String(pc.name).replace(/[|—]/g,' ')+' — '+pc.d+' ج':''};
+/*PROMO_END*/
+
+/* ====== وصف المنتج واختياراته (إجبارية) ====== */
+const saveOpts=()=>lsSet('tt_opts',S.opts);
+const optGroups=p=>Array.isArray(p&&p.options)?p.options.filter(g=>g&&g.name&&Array.isArray(g.choices)&&g.choices.length):[];
+const hasOpts=p=>optGroups(p).length>0;
+const optText=p=>{const s=S.opts[p.code]||{};return optGroups(p).map(g=>s[g.name]?g.name+': '+s[g.name]:'').filter(Boolean).join('، ')};
+const optLineHTML=p=>hasOpts(p)&&optText(p)?`<small style="display:block;color:var(--plum)">${esc(optText(p))} <a href="#" onclick="openProd('${p.code}');return false">تعديل</a></small>`:'';
+const optsNote=()=>{const o=items().filter(x=>hasOpts(x.p)&&optText(x.p)).map(x=>x.p.name+(x.p.size?' '+x.p.size:'')+' ('+optText(x.p).replace(/[|]/g,' ')+')');return o.length?'خيارات: '+o.join(' ؛ '):''};
+function optMissing(){for(const x of items()){const sel=S.opts[x.p.code]||{};const g=optGroups(x.p).find(g=>g.req!==false&&!g.choices.includes(sel[g.name]));if(g)return{p:x.p,g}}return null}
+function openProd(c){const p=prod(c);if(!p)return;S.pm={c,sel:{...(S.opts[c]||{})}};drawProd();$('#pm').classList.add('show')}
+function closeProd(){const e=$('#pm');if(e)e.classList.remove('show');S.pm=null}
+function pickOpt(gi,ci){if(!S.pm)return;const g=optGroups(prod(S.pm.c))[gi];if(g){S.pm.sel[g.name]=g.choices[ci];drawProd()}}
+const pmMissing=p=>optGroups(p).filter(g=>g.req!==false&&!g.choices.includes(S.pm.sel[g.name]));
+function drawProd(){
+  const p=prod(S.pm.c),sel=S.pm.sel,G=optGroups(p),miss=pmMissing(p),out=p.in_stock===false,inCart=!!S.cart[p.code];
+  $('#pmBody').innerHTML=`<button class="px" onclick="closeProd()" aria-label="إغلاق">✕</button>${p.image_url?`<img class="pmi" src="${esc(p.image_url)}" alt="" onerror="this.remove()">`:''}<h3>${esc(p.name)}</h3><div class="sz">${esc(p.size||'')}</div><div class="price">${p.old_price>p.price?`<s class="old">${n2(p.old_price)}</s> `:''}${n2(p.price)} <small>ج</small></div>${p.description?`<p class="pmd">${esc(p.description).replace(/\n/g,'<br>')}</p>`:''}${G.map((g,gi)=>`<div class="og"><b>${esc(g.name)}${g.req!==false?' <i>*</i>':''}</b><div class="oc">${g.choices.map((c,ci)=>`<button class="opt ${sel[g.name]===c?'on':''}" onclick="pickOpt(${gi},${ci})">${esc(c)}</button>`).join('')}</div></div>`).join('')}<button class="btn" ${out||miss.length?'disabled':''} onclick="pmAdd()">${out?'غير متاح':miss.length?'اختار '+esc(miss[0].name)+' الأول':(inCart&&G.length?'حفظ الاختيارات':'أضف للسلة')}</button>`}
+function pmAdd(){
+  if(!S.pm)return;const p=prod(S.pm.c);if(!p||pmMissing(p).length)return;
+  const c=p.code,had=!!S.cart[c],sel={...S.pm.sel};
+  if(hasOpts(p))S.opts[c]=sel;closeProd();
+  if(!had||!hasOpts(p))chg(c,1);else{saveOpts();updCart();if($('#drawer').classList.contains('show'))drawDrawer()}}
+
 /* ====== عدّاد الزيارات ====== */
 function drawVisits(){const e=$('#fVis');if(!e)return;const on=(SITE().show||{}).visits!==false;
   e.textContent=(on&&S.visits!=null)?'👀 عدد زيارات الموقع: '+n2(S.visits):''}
@@ -403,20 +463,21 @@ function drawProducts(){
 function card(p){
   const out=p.in_stock===false;
   return `<article class="pc">${out?'<span class="soldout">خلصت</span>':''}
-  <div class="ph">${p.old_price>p.price?`<span class="dbadge">خصم ${Math.round(+p.discount||(1-p.price/p.old_price)*100)}%</span>`:''}<div class="ph0">${JAR}<span>صورة المنتج</span></div>${p.image_url?`<img src="${esc(p.image_url)}" alt="${esc(p.name)}" loading="lazy" onerror="this.remove()">`:''}</div>
-  <div class="nm">${esc(p.name)}</div><div class="sz">${esc(p.size||'')}</div>
+  <div class="ph" onclick="openProd('${p.code}')" style="cursor:pointer">${p.old_price>p.price?`<span class="dbadge">خصم ${Math.round(+p.discount||(1-p.price/p.old_price)*100)}%</span>`:''}<div class="ph0">${JAR}<span>صورة المنتج</span></div>${p.image_url?`<img src="${esc(p.image_url)}" alt="${esc(p.name)}" loading="lazy" onerror="this.remove()">`:''}</div>
+  <div class="nm" onclick="openProd('${p.code}')" style="cursor:pointer">${esc(p.name)}</div><div class="sz">${esc(p.size||'')}</div>
   <div class="bt"><div class="price">${p.old_price>p.price?`<s class="old">${n2(p.old_price)}</s>`:''}${n2(p.price)} <small>ج</small></div><div id="c-${p.code}">${ctl(p)}</div></div></article>`}
 function ctl(p){
   if(p.in_stock===false)return '<button class="add" disabled>غير متاح</button>';
   const q=S.cart[p.code]||0;
   return q?`<div class="stp"><button onclick="chg('${p.code}',-1)" aria-label="أنقص">−</button><b>${q}</b><button onclick="chg('${p.code}',1)" aria-label="زوّد">+</button></div>`
-          :`<button class="add" onclick="chg('${p.code}',1)">+ أضف</button>`}
+          :`<button class="add" onclick="${hasOpts(p)?`openProd('${p.code}')`:`chg('${p.code}',1)`}">${hasOpts(p)?'اختار وأضف':'+ أضف'}</button>`}
 function chg(c,d){
   if(S.shop.accepting===false&&d>0)return toast('الطلبات متوقفة مؤقتًا');
+  if(d>0&&hasOpts(prod(c)||{})&&!S.opts[c]&&!S.cart[c])return openProd(c);
   const q=Math.max(0,Math.min(99,(S.cart[c]||0)+d));
   if(d>0){const p0=prod(c);if(p0)track('AddToCart',{value:p0.price,items:[{code:p0.code,name:p0.name,price:p0.price,q:1}]})}
-  if(q)S.cart[c]=q;else delete S.cart[c];
-  saveCart();const p=prod(c),el=$('#c-'+c);if(p&&el)el.innerHTML=ctl(p);updCart();
+  if(q)S.cart[c]=q;else{delete S.cart[c];delete S.opts[c]}
+  saveCart();saveOpts();const p=prod(c),el=$('#c-'+c);if(p&&el)el.innerHTML=ctl(p);updCart();
   if($('#drawer').classList.contains('show'))drawDrawer()}
 
 const items=()=>Object.keys(S.cart).map(c=>({p:prod(c),q:S.cart[c]})).filter(x=>x.p);
@@ -426,7 +487,7 @@ const count=()=>items().reduce((a,x)=>a+x.q,0);
 function updCart(){
   const n=count();$('#hCnt').textContent=n;
   $('#bar').classList.toggle('show',n>0&&!$('#drawer').classList.contains('show'));
-  $('#barT').textContent='🧺 السلة ('+n+')';$('#barP').textContent=n2(sub())+' ج'}
+  $('#barT').textContent='🧺 السلة ('+n+')';$('#barP').textContent=n2(sub()-promoD())+' ج'}
 
 /* ====== الدرج: سلة / بيانات / تم ====== */
 function openCart(){S.view=S.done?'done':'cart';S.err='';drawDrawer();$('#ov').classList.add('show');$('#drawer').classList.add('show');$('#drawer').setAttribute('aria-hidden','false');updCart()}
@@ -436,7 +497,7 @@ function drawDrawer(){
   if(S.view=='done'){$('#dTitle').textContent='تم الطلب ✔';body.innerHTML=doneHTML();foot.innerHTML='<button class="btn sec2" onclick="closeCart()">رجوع للمنتجات</button>';return}
   if(S.view=='cart'){
     $('#dTitle').textContent='سلة '+(S.shop.shop_name||'تيتة');
-    body.innerHTML=it.length?it.map(x=>`<div class="li"><div class="th">${x.p.image_url?`<img src="${esc(x.p.image_url)}" alt="" onerror="this.remove()">`:''}</div><div class="tx"><b>${esc(x.p.name)}</b><small>${esc(x.p.size||'')} · ${n2(x.p.price)} ج</small></div><div class="stp"><button onclick="chg('${x.p.code}',-1)">−</button><b>${x.q}</b><button onclick="chg('${x.p.code}',1)">+</button></div><div class="sm">${n2(x.p.price*x.q)}</div></div>`).join(''):'<div class="empty">السلة فاضية.. اختار حاجة حلوة 🍓</div>';
+    body.innerHTML=it.length?it.map(x=>`<div class="li"><div class="th">${x.p.image_url?`<img src="${esc(x.p.image_url)}" alt="" onerror="this.remove()">`:''}</div><div class="tx"><b>${esc(x.p.name)}</b><small>${esc(x.p.size||'')} · ${n2(x.p.price)} ج</small>${optLineHTML(x.p)}</div><div class="stp"><button onclick="chg('${x.p.code}',-1)">−</button><b>${x.q}</b><button onclick="chg('${x.p.code}',1)">+</button></div><div class="sm">${n2(x.p.price*x.q)}</div></div>`).join(''):'<div class="empty">السلة فاضية.. اختار حاجة حلوة 🍓</div>';
     foot.innerHTML=it.length?totHTML()+`<button class="btn" onclick="toForm()">كمّل الطلب ←</button>`:'';return}
   /* form */
   $('#dTitle').textContent='بياناتك';
@@ -452,20 +513,21 @@ function drawDrawer(){
   ${shipHTML()}
   <label class="f">طريقة الدفع</label>
   ${pays.map(([k,l])=>`<label class="pm ${S.pay==k?'on':''}"><input type="radio" name="pay" ${S.pay==k?'checked':''} onchange="setPay('${k}')"> ${l}</label>`).join('')}
-  ${tr?`<div class="note">حوّل <b>${n2(sub()+delivery())} ج</b> على ${esc(cur.name||'')}:<br><b class="cp" onclick="copyTxt('${esc(num)}')">${esc(num)}</b> <small>(اضغط للنسخ)</small>${cur.note?'<br>'+esc(cur.note):''}<br>وبعدها اكتب رقم العملية أو ارفع صورة التحويل.</div>
+  ${tr?`<div class="note">حوّل <b>${n2(netTot())} ج</b> على ${esc(cur.name||'')}:<br><b class="cp" onclick="copyTxt('${esc(num)}')">${esc(num)}</b> <small>(اضغط للنسخ)</small>${cur.note?'<br>'+esc(cur.note):''}<br>وبعدها اكتب رقم العملية أو ارفع صورة التحويل.</div>
   <label class="f">رقم العملية / رقم المحوَّل منه</label><input class="in" id="f_ref" value="${esc(f.ref||'')}">
   <label class="f">صورة التحويل (اختياري لو كتبت الرقم)</label><input class="in" id="f_rec" type="file" accept="image/*">`:''}
   ${S.err?`<div class="err">${esc(S.err)}</div>`:''}`;
   foot.innerHTML=totHTML()+`<button class="btn" id="sendBtn" onclick="submitOrder()" ${S.busy?'disabled':''}>${S.busy?'جاري الإرسال...':'✔ تأكيد الطلب'}</button><button class="btn sec2" onclick="S.view='cart';drawDrawer()">← رجوع للسلة</button>`}
-function totHTML(){const d=delivery(),min=+S.shop.min_order||0;
-  return `<div class="tot"><div><span>المنتجات</span><span>${n2(sub())} ج</span></div>${d>0?`<div><span>التوصيل</span><span>${n2(d)} ج</span></div>`:''}<div class="g"><span>الإجمالي</span><span>${n2(sub()+d)} ج</span></div></div>${min&&sub()<min?`<div class="note">الحد الأدنى للطلب ${n2(min)} ج</div>`:''}`}
+function totHTML(){const pc=promoCalc(),d=delivery(),min=+S.shop.min_order||0;
+  return `<div class="tot"><div><span>المنتجات</span><span>${n2(sub())} ج</span></div>${pc?`<div style="color:var(--plum)"><span>🏷️ ${esc(pc.name)}</span><span>- ${n2(pc.d)} ج</span></div>`:''}${d>0?`<div><span>التوصيل</span><span>${n2(d)} ج</span></div>`:''}<div class="g"><span>الإجمالي</span><span>${n2(sub()-promoD()+d)} ج</span></div></div>${promoHint()}${min&&sub()<min?`<div class="note">الحد الأدنى للطلب ${n2(min)} ج</div>`:''}`}
 function readForm(){const g=id=>($('#'+id)?.value??'').trim();
   S.f={name:g('f_name'),phone:g('f_phone'),area:g('f_area'),address:g('f_addr'),notes:g('f_notes'),ref:$('#f_ref')?g('f_ref'):S.f.ref};lsSet('tt_cust',{...S.f,ref:''})}
 function setPay(k){readForm();S.pay=k;S.err='';drawDrawer()}
 function toForm(){
   if(S.shop.accepting===false)return toast('الطلبات متوقفة مؤقتًا');
   const min=+S.shop.min_order||0;if(min&&sub()<min)return toast('الحد الأدنى للطلب '+n2(min)+' ج');
-  track('InitiateCheckout',{value:sub(),items:cartItemsT()});S.view='form';S.err='';drawDrawer()}
+  const om=optMissing();if(om){toast('اختار '+om.g.name+' لـ '+om.p.name);closeCart();return openProd(om.p.code)}
+  track('InitiateCheckout',{value:sub()-promoD(),items:cartItemsT()});S.view='form';S.err='';drawDrawer()}
 function copyTxt(t){try{navigator.clipboard.writeText(t);toast('تم النسخ ✔')}catch(e){toast(t)}}
 
 function blobOf(file,max,q){return new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const k=Math.min(1,max/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(im,0,0,c.width,c.height);c.toBlob(b=>b?ok(b):no(new Error('x')),'image/jpeg',q)};im.onerror=()=>no(new Error('x'));im.src=r.result};r.onerror=()=>no(new Error('x'));r.readAsDataURL(file)})}
@@ -476,6 +538,7 @@ async function submitOrder(){
   if($('#f_hp')&&$('#f_hp').value)return; // سبام
   const f=S.f,digits=f.phone.replace(/\D/g,'');
   const fail=m=>{S.err=m;drawDrawer()};
+  const om=optMissing();if(om)return fail('اختار '+om.g.name+' لـ '+om.p.name);
   if(f.name.length<2)return fail('اكتب اسمك');
   if(digits.length<10)return fail('رقم الموبايل مش مظبوط');
   if(!deliveryAreas().some(a=>String(a.name).trim()===String(f.area||'').trim()))return fail('اختار منطقة التوصيل عشان نحدد السعر');
@@ -491,9 +554,9 @@ async function submitOrder(){
       catch(e){if(!f.ref)throw e}}
     const payName=(payMethods().find(m=>m.k==S.pay)||{}).name||'كاش عند الاستلام';
     const res=await api('/rest/v1/rpc/place_order',{method:'POST',body:JSON.stringify({
-      p_name:f.name,p_phone:f.phone,p_area:f.area,p_address:f.address,p_notes:[f.notes,shipNote(),attrNote()].filter(Boolean).join(' | '),p_pay:payName,p_pay_ref:f.ref||'',p_receipt:receipt,
+      p_name:f.name,p_phone:f.phone,p_area:f.area,p_address:f.address,p_notes:[f.notes,shipNote(),promoNote(),optsNote(),attrNote()].filter(Boolean).join(' | '),p_pay:payName,p_pay_ref:f.ref||'',p_receipt:receipt,
       p_items:items().map(x=>({code:x.p.code,qty:x.q}))})});
-    S.done={...res,delivery:delivery(),total:sub()+delivery(),pay:payName,ref:f.ref,name:f.name,phone:f.phone,area:f.area,address:f.address,notes:f.notes,lines:items().map(x=>({n:x.p.name+' '+(x.p.size||''),q:x.q,t:x.p.price*x.q}))};
+    S.done={...res,delivery:delivery(),total:netTot(),promo:promoD(),promoName:(promoCalc()||{}).name||'',pay:payName,ref:f.ref,name:f.name,phone:f.phone,area:f.area,address:f.address,notes:f.notes,lines:items().map(x=>({n:x.p.name+' '+(x.p.size||'')+(hasOpts(x.p)?' ('+optText(x.p)+')':''),q:x.q,t:x.p.price*x.q}))};
     track('Purchase',{value:S.done.total,id:'TT'+S.done.no,items:cartItemsT()});S.cart={};saveCart();S.view='done';
     for(const p of S.products){const el=$('#c-'+p.code);if(el)el.innerHTML=ctl(p)}
     updCart()
@@ -501,7 +564,7 @@ async function submitOrder(){
   S.busy=false;drawDrawer()}
 
 function waLink(){const d=S.done,w=String(S.shop.whatsapp||'').replace(/\D/g,'');if(!w||!d)return '';
-  const t=`*طلب جديد من الموقع #${d.no}*\n👤 ${d.name}\n📞 ${d.phone}\n📍 ${[d.area,d.address].filter(Boolean).join(' - ')}\n\n`+d.lines.map(l=>`• ${l.n} × ${l.q} = ${n2(l.t)}`).join('\n')+(d.delivery>0?`\nالتوصيل: ${n2(d.delivery)}`:'')+`\n*الإجمالي: ${n2(d.total)} ج*\nالدفع: ${d.pay}${d.ref?'\nمرجع: '+d.ref:''}${d.notes?'\nملاحظات: '+d.notes:''}`;
+  const t=`*طلب جديد من الموقع #${d.no}*\n👤 ${d.name}\n📞 ${d.phone}\n📍 ${[d.area,d.address].filter(Boolean).join(' - ')}\n\n`+d.lines.map(l=>`• ${l.n} × ${l.q} = ${n2(l.t)}`).join('\n')+(d.promo>0?`\n🏷️ ${d.promoName}: -${n2(d.promo)}`:'')+(d.delivery>0?`\nالتوصيل: ${n2(d.delivery)}`:'')+`\n*الإجمالي: ${n2(d.total)} ج*\nالدفع: ${d.pay}${d.ref?'\nمرجع: '+d.ref:''}${d.notes?'\nملاحظات: '+d.notes:''}`;
   return 'https://wa.me/'+w+'?text='+encodeURIComponent(t)}
 function doneHTML(){const d=S.done;if(!d)return '';const wl=waLink();
   return `<div class="done"><div class="big">🍓</div><h4>وصلنا طلبك يا ${esc(d.name)}!</h4><div class="no">طلب رقم ${d.no}</div>
@@ -509,7 +572,7 @@ function doneHTML(){const d=S.done;if(!d)return '';const wl=waLink();
   <p style="color:var(--mut)">تيتة هتتواصل معاك على <b>${esc(d.phone)}</b> لتأكيد الطلب.</p>
   ${wl?`<a class="btn wa" onclick="track('Contact')" href="${wl}" target="_blank" rel="noopener">💬 ابعت تفاصيل الطلب على واتساب</a><p style="font-size:13px;color:var(--mut)">اضغط الزرار عشان الطلب يوصل لتيتة أسرع.</p>`:''}</div>`}
 
-document.addEventListener('keydown',e=>{if(e.key=='Escape')closeCart()});
+document.addEventListener('keydown',e=>{if(e.key=='Escape'){closeCart();closeProd()}});
 load();logVisit();
 </script>
 </body>
