@@ -356,7 +356,7 @@ function track(ev,d){
   try{if(window.gtag){const m={AddToCart:'add_to_cart',InitiateCheckout:'begin_checkout',Purchase:'purchase',ViewContent:'view_item',Contact:'generate_lead'};
     gtag('event',m[ev]||ev,{value:val,currency:cur,transaction_id:d.id,items:it.map(x=>({item_id:x.code,item_name:x.name,price:x.price,quantity:x.q}))});
     const aw=String((SITE().ads||{}).aw||'');if(ev==='Purchase'&&aw.indexOf('/')>0)gtag('event','conversion',{send_to:aw,value:val,currency:cur,transaction_id:d.id})}}catch(e){}}
-const cartItemsT=()=>items().map(x=>({code:x.p.code,name:x.p.name,price:x.p.price,q:x.q}));
+const cartItemsT=()=>items().map(x=>({code:x.p.code,name:x.p.name,price:unit(x.p),q:x.q}));
 
 /* ====== السوشيال والواتساب ====== */
 function socUrl(k,v){v=String(v||'').trim();if(!v)return '';if(/^https?:\/\//i.test(v))return v;
@@ -380,10 +380,10 @@ function promoCalc(){
   for(const pr of (SITE().promos||[]).filter(promoActive)){
     const sel=its.filter(x=>pr.all!==false||(pr.codes||[]).includes(x.p.code));
     if(sel.reduce((a,x)=>a+x.q,0)<(+pr.minQty||1))continue;
-    const orig=sel.reduce((a,x)=>a+origPrice(x.p)*x.q,0),cur=sel.reduce((a,x)=>a+x.p.price*x.q,0);
+    const orig=sel.reduce((a,x)=>a+unitOrig(x.p)*x.q,0),cur=sel.reduce((a,x)=>a+unit(x.p)*x.q,0);
     const after=pr.type=='egp'?Math.max(0,orig-(+pr.value||0)):orig*(1-(+pr.value||0)/100);
     const d=Math.round((cur-after)*100)/100;
-    if(d>0&&(!best||d>best.d))best={name:pr.name||'عرض خاص',d,pr}}
+    if(!best||d>best.d)best={name:pr.name||'عرض خاص',d,pr}}
   return best}
 const promoD=()=>(promoCalc()||{d:0}).d;
 const netTot=()=>Math.round((sub()-promoD()+delivery())*100)/100;
@@ -398,19 +398,26 @@ const promoNote=()=>{const pc=promoCalc();return pc?'خصم العرض: '+String
 
 /* ====== وصف المنتج واختياراته (إجبارية) ====== */
 const saveOpts=()=>lsSet('tt_opts',S.opts);
-const optGroups=p=>Array.isArray(p&&p.options)?p.options.filter(g=>g&&g.name&&Array.isArray(g.choices)&&g.choices.length):[];
+const optGroups=p=>Array.isArray(p&&p.options)?p.options.map(g=>g&&Array.isArray(g.choices)?{...g,choices:g.choices.map(c=>typeof c=='string'?{label:c,price:0}:c).filter(c=>c&&c.label)}:null).filter(g=>g&&g.name&&g.choices.length):[];
+/* سعر الاختيار = سعر المنتج كامل (قبل خصم المنتج) ويتطبق عليه نفس % خصم المنتج. أول قسم له سعر هو اللي بيحدد السعر */
+const baseFor=(p,sel)=>{for(const g of optGroups(p)){const c=g.choices.find(c=>c.label===sel[g.name]);if(c&&+c.price>0)return +c.price}return null};
+const unitFor=(p,sel)=>{const b=baseFor(p,sel);return b==null?+p.price:Math.round(b*(100-(+p.discount||0)))/100};
+const origFor=(p,sel)=>{const b=baseFor(p,sel);return b==null?origPrice(p):b};
+const unit=p=>unitFor(p,S.opts[p.code]||{}),unitOrig=p=>origFor(p,S.opts[p.code]||{});
+function pFrom(p){const g=optGroups(p).find(g=>g.choices.some(c=>c.price>0));if(!g)return n2(p.price);const d=+p.discount||0,v=g.choices.filter(c=>c.price>0).map(c=>Math.round(c.price*(100-d))/100);if(g.choices.some(c=>!(c.price>0)))v.push(+p.price);const a=Math.min(...v);return (Math.max(...v)!==a?'من ':'')+n2(a)}
+const optPriceNote=()=>{const o=items().filter(x=>hasOpts(x.p)&&unit(x.p)!==+x.p.price).map(x=>x.p.code+'='+unit(x.p));return o.length?'سعر الخيار: '+o.join(';'):''};
 const hasOpts=p=>optGroups(p).length>0;
 const optText=p=>{const s=S.opts[p.code]||{};return optGroups(p).map(g=>s[g.name]?g.name+': '+s[g.name]:'').filter(Boolean).join('، ')};
 const optLineHTML=p=>hasOpts(p)&&optText(p)?`<small style="display:block;color:var(--plum)">${esc(optText(p))} <a href="#" onclick="openProd('${p.code}');return false">تعديل</a></small>`:'';
 const optsNote=()=>{const o=items().filter(x=>hasOpts(x.p)&&optText(x.p)).map(x=>x.p.name+(x.p.size?' '+x.p.size:'')+' ('+optText(x.p).replace(/[|]/g,' ')+')');return o.length?'خيارات: '+o.join(' ؛ '):''};
-function optMissing(){for(const x of items()){const sel=S.opts[x.p.code]||{};const g=optGroups(x.p).find(g=>g.req!==false&&!g.choices.includes(sel[g.name]));if(g)return{p:x.p,g}}return null}
+function optMissing(){for(const x of items()){const sel=S.opts[x.p.code]||{};const g=optGroups(x.p).find(g=>g.req!==false&&!g.choices.some(c=>c.label===sel[g.name]));if(g)return{p:x.p,g}}return null}
 function openProd(c){const p=prod(c);if(!p)return;S.pm={c,sel:{...(S.opts[c]||{})}};drawProd();$('#pm').classList.add('show')}
 function closeProd(){const e=$('#pm');if(e)e.classList.remove('show');S.pm=null}
-function pickOpt(gi,ci){if(!S.pm)return;const g=optGroups(prod(S.pm.c))[gi];if(g){S.pm.sel[g.name]=g.choices[ci];drawProd()}}
-const pmMissing=p=>optGroups(p).filter(g=>g.req!==false&&!g.choices.includes(S.pm.sel[g.name]));
+function pickOpt(gi,ci){if(!S.pm)return;const g=optGroups(prod(S.pm.c))[gi];if(g){S.pm.sel[g.name]=g.choices[ci].label;drawProd()}}
+const pmMissing=p=>optGroups(p).filter(g=>g.req!==false&&!g.choices.some(c=>c.label===S.pm.sel[g.name]));
 function drawProd(){
   const p=prod(S.pm.c),sel=S.pm.sel,G=optGroups(p),miss=pmMissing(p),out=p.in_stock===false,inCart=!!S.cart[p.code];
-  $('#pmBody').innerHTML=`<button class="px" onclick="closeProd()" aria-label="إغلاق">✕</button>${p.image_url?`<img class="pmi" src="${esc(p.image_url)}" alt="" onerror="this.remove()">`:''}<h3>${esc(p.name)}</h3><div class="sz">${esc(p.size||'')}</div><div class="price">${p.old_price>p.price?`<s class="old">${n2(p.old_price)}</s> `:''}${n2(p.price)} <small>ج</small></div>${p.description?`<p class="pmd">${esc(p.description).replace(/\n/g,'<br>')}</p>`:''}${G.map((g,gi)=>`<div class="og"><b>${esc(g.name)}${g.req!==false?' <i>*</i>':''}</b><div class="oc">${g.choices.map((c,ci)=>`<button class="opt ${sel[g.name]===c?'on':''}" onclick="pickOpt(${gi},${ci})">${esc(c)}</button>`).join('')}</div></div>`).join('')}<button class="btn" ${out||miss.length?'disabled':''} onclick="pmAdd()">${out?'غير متاح':miss.length?'اختار '+esc(miss[0].name)+' الأول':(inCart&&G.length?'حفظ الاختيارات':'أضف للسلة')}</button>`}
+  $('#pmBody').innerHTML=`<button class="px" onclick="closeProd()" aria-label="إغلاق">✕</button>${p.image_url?`<img class="pmi" src="${esc(p.image_url)}" alt="" onerror="this.remove()">`:''}<h3>${esc(p.name)}</h3><div class="sz">${esc(p.size||'')}</div><div class="price">${origFor(p,sel)>unitFor(p,sel)?`<s class="old">${n2(origFor(p,sel))}</s> `:''}${n2(unitFor(p,sel))} <small>ج</small></div>${p.description?`<p class="pmd">${esc(p.description).replace(/\n/g,'<br>')}</p>`:''}${G.map((g,gi)=>`<div class="og"><b>${esc(g.name)}${g.req!==false?' <i>*</i>':''}</b><div class="oc">${g.choices.map((c,ci)=>`<button class="opt ${sel[g.name]===c.label?'on':''}" onclick="pickOpt(${gi},${ci})">${esc(c.label)}${c.price>0?` <small>${n2(c.price)} ج</small>`:''}</button>`).join('')}</div></div>`).join('')}<button class="btn" ${out||miss.length?'disabled':''} onclick="pmAdd()">${out?'غير متاح':miss.length?'اختار '+esc(miss[0].name)+' الأول':(inCart&&G.length?'حفظ الاختيارات':'أضف للسلة')}</button>`}
 function pmAdd(){
   if(!S.pm)return;const p=prod(S.pm.c);if(!p||pmMissing(p).length)return;
   const c=p.code,had=!!S.cart[c],sel={...S.pm.sel};
@@ -465,7 +472,7 @@ function card(p){
   return `<article class="pc">${out?'<span class="soldout">خلصت</span>':''}
   <div class="ph" onclick="openProd('${p.code}')" style="cursor:pointer">${p.old_price>p.price?`<span class="dbadge">خصم ${Math.round(+p.discount||(1-p.price/p.old_price)*100)}%</span>`:''}<div class="ph0">${JAR}<span>صورة المنتج</span></div>${p.image_url?`<img src="${esc(p.image_url)}" alt="${esc(p.name)}" loading="lazy" onerror="this.remove()">`:''}</div>
   <div class="nm" onclick="openProd('${p.code}')" style="cursor:pointer">${esc(p.name)}</div><div class="sz">${esc(p.size||'')}</div>
-  <div class="bt"><div class="price">${p.old_price>p.price?`<s class="old">${n2(p.old_price)}</s>`:''}${n2(p.price)} <small>ج</small></div><div id="c-${p.code}">${ctl(p)}</div></div></article>`}
+  <div class="bt"><div class="price">${p.old_price>p.price?`<s class="old">${n2(p.old_price)}</s>`:''}${pFrom(p)} <small>ج</small></div><div id="c-${p.code}">${ctl(p)}</div></div></article>`}
 function ctl(p){
   if(p.in_stock===false)return '<button class="add" disabled>غير متاح</button>';
   const q=S.cart[p.code]||0;
@@ -475,13 +482,13 @@ function chg(c,d){
   if(S.shop.accepting===false&&d>0)return toast('الطلبات متوقفة مؤقتًا');
   if(d>0&&hasOpts(prod(c)||{})&&!S.opts[c]&&!S.cart[c])return openProd(c);
   const q=Math.max(0,Math.min(99,(S.cart[c]||0)+d));
-  if(d>0){const p0=prod(c);if(p0)track('AddToCart',{value:p0.price,items:[{code:p0.code,name:p0.name,price:p0.price,q:1}]})}
+  if(d>0){const p0=prod(c);if(p0)track('AddToCart',{value:unit(p0),items:[{code:p0.code,name:p0.name,price:unit(p0),q:1}]})}
   if(q)S.cart[c]=q;else{delete S.cart[c];delete S.opts[c]}
   saveCart();saveOpts();const p=prod(c),el=$('#c-'+c);if(p&&el)el.innerHTML=ctl(p);updCart();
   if($('#drawer').classList.contains('show'))drawDrawer()}
 
 const items=()=>Object.keys(S.cart).map(c=>({p:prod(c),q:S.cart[c]})).filter(x=>x.p);
-const sub=()=>items().reduce((a,x)=>a+x.p.price*x.q,0);
+const sub=()=>items().reduce((a,x)=>a+unit(x.p)*x.q,0);
 const delivery=()=>!items().length?0:areaFee();
 const count=()=>items().reduce((a,x)=>a+x.q,0);
 function updCart(){
@@ -497,7 +504,7 @@ function drawDrawer(){
   if(S.view=='done'){$('#dTitle').textContent='تم الطلب ✔';body.innerHTML=doneHTML();foot.innerHTML='<button class="btn sec2" onclick="closeCart()">رجوع للمنتجات</button>';return}
   if(S.view=='cart'){
     $('#dTitle').textContent='سلة '+(S.shop.shop_name||'تيتة');
-    body.innerHTML=it.length?it.map(x=>`<div class="li"><div class="th">${x.p.image_url?`<img src="${esc(x.p.image_url)}" alt="" onerror="this.remove()">`:''}</div><div class="tx"><b>${esc(x.p.name)}</b><small>${esc(x.p.size||'')} · ${n2(x.p.price)} ج</small>${optLineHTML(x.p)}</div><div class="stp"><button onclick="chg('${x.p.code}',-1)">−</button><b>${x.q}</b><button onclick="chg('${x.p.code}',1)">+</button></div><div class="sm">${n2(x.p.price*x.q)}</div></div>`).join(''):'<div class="empty">السلة فاضية.. اختار حاجة حلوة 🍓</div>';
+    body.innerHTML=it.length?it.map(x=>`<div class="li"><div class="th">${x.p.image_url?`<img src="${esc(x.p.image_url)}" alt="" onerror="this.remove()">`:''}</div><div class="tx"><b>${esc(x.p.name)}</b><small>${esc(x.p.size||'')} · ${n2(unit(x.p))} ج</small>${optLineHTML(x.p)}</div><div class="stp"><button onclick="chg('${x.p.code}',-1)">−</button><b>${x.q}</b><button onclick="chg('${x.p.code}',1)">+</button></div><div class="sm">${n2(unit(x.p)*x.q)}</div></div>`).join(''):'<div class="empty">السلة فاضية.. اختار حاجة حلوة 🍓</div>';
     foot.innerHTML=it.length?totHTML()+`<button class="btn" onclick="toForm()">كمّل الطلب ←</button>`:'';return}
   /* form */
   $('#dTitle').textContent='بياناتك';
@@ -519,7 +526,7 @@ function drawDrawer(){
   ${S.err?`<div class="err">${esc(S.err)}</div>`:''}`;
   foot.innerHTML=totHTML()+`<button class="btn" id="sendBtn" onclick="submitOrder()" ${S.busy?'disabled':''}>${S.busy?'جاري الإرسال...':'✔ تأكيد الطلب'}</button><button class="btn sec2" onclick="S.view='cart';drawDrawer()">← رجوع للسلة</button>`}
 function totHTML(){const pc=promoCalc(),d=delivery(),min=+S.shop.min_order||0;
-  return `<div class="tot"><div><span>المنتجات</span><span>${n2(sub())} ج</span></div>${pc?`<div style="color:var(--plum)"><span>🏷️ ${esc(pc.name)}</span><span>- ${n2(pc.d)} ج</span></div>`:''}${d>0?`<div><span>التوصيل</span><span>${n2(d)} ج</span></div>`:''}<div class="g"><span>الإجمالي</span><span>${n2(sub()-promoD()+d)} ج</span></div></div>${promoHint()}${min&&sub()<min?`<div class="note">الحد الأدنى للطلب ${n2(min)} ج</div>`:''}`}
+  return `<div class="tot"><div><span>المنتجات</span><span>${n2(sub())} ج</span></div>${pc&&pc.d?`<div style="color:var(--plum)"><span>🏷️ ${esc(pc.name)}${pc.d<0?' (بدل خصم المنتج)':''}</span><span>${pc.d>0?'-':'+'} ${n2(Math.abs(pc.d))} ج</span></div>`:''}${d>0?`<div><span>التوصيل</span><span>${n2(d)} ج</span></div>`:''}<div class="g"><span>الإجمالي</span><span>${n2(sub()-promoD()+d)} ج</span></div></div>${promoHint()}${min&&sub()<min?`<div class="note">الحد الأدنى للطلب ${n2(min)} ج</div>`:''}`}
 function readForm(){const g=id=>($('#'+id)?.value??'').trim();
   S.f={name:g('f_name'),phone:g('f_phone'),area:g('f_area'),address:g('f_addr'),notes:g('f_notes'),ref:$('#f_ref')?g('f_ref'):S.f.ref};lsSet('tt_cust',{...S.f,ref:''})}
 function setPay(k){readForm();S.pay=k;S.err='';drawDrawer()}
@@ -554,9 +561,9 @@ async function submitOrder(){
       catch(e){if(!f.ref)throw e}}
     const payName=(payMethods().find(m=>m.k==S.pay)||{}).name||'كاش عند الاستلام';
     const res=await api('/rest/v1/rpc/place_order',{method:'POST',body:JSON.stringify({
-      p_name:f.name,p_phone:f.phone,p_area:f.area,p_address:f.address,p_notes:[f.notes,shipNote(),promoNote(),optsNote(),attrNote()].filter(Boolean).join(' | '),p_pay:payName,p_pay_ref:f.ref||'',p_receipt:receipt,
+      p_name:f.name,p_phone:f.phone,p_area:f.area,p_address:f.address,p_notes:[f.notes,shipNote(),promoNote(),optsNote(),optPriceNote(),attrNote()].filter(Boolean).join(' | '),p_pay:payName,p_pay_ref:f.ref||'',p_receipt:receipt,
       p_items:items().map(x=>({code:x.p.code,qty:x.q}))})});
-    S.done={...res,delivery:delivery(),total:netTot(),promo:promoD(),promoName:(promoCalc()||{}).name||'',pay:payName,ref:f.ref,name:f.name,phone:f.phone,area:f.area,address:f.address,notes:f.notes,lines:items().map(x=>({n:x.p.name+' '+(x.p.size||'')+(hasOpts(x.p)?' ('+optText(x.p)+')':''),q:x.q,t:x.p.price*x.q}))};
+    S.done={...res,delivery:delivery(),total:netTot(),promo:promoD(),promoName:(promoCalc()||{}).name||'',pay:payName,ref:f.ref,name:f.name,phone:f.phone,area:f.area,address:f.address,notes:f.notes,lines:items().map(x=>({n:x.p.name+' '+(x.p.size||'')+(hasOpts(x.p)?' ('+optText(x.p)+')':''),q:x.q,t:unit(x.p)*x.q}))};
     track('Purchase',{value:S.done.total,id:'TT'+S.done.no,items:cartItemsT()});S.cart={};saveCart();S.view='done';
     for(const p of S.products){const el=$('#c-'+p.code);if(el)el.innerHTML=ctl(p)}
     updCart()
