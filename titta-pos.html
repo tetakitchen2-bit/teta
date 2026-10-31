@@ -265,7 +265,7 @@ async function syncProducts(manual){
  if(!cloudOn())return manual&&toast('اربط الموقع الأول من الإعدادات');
  try{
   const ts=new Date().toISOString();
-  const rows=DB.products.map((p,i)=>({code:p.code,name:p.name,size:p.size||'',cat:p.cat||'أخرى',price:ep(p),old_price:(+p.disc>0)?p.price:null,discount:+p.disc>0?+p.disc:0,active:!!p.active,in_stock:p.stock==null||p.stock>0,image_url:p.img||null,description:p.desc||null,options:(p.opts&&p.opts.length)?p.opts:null,sort:i,updated_at:ts}));
+  const rows=plist().map((p,i)=>({code:p.code,name:p.name,size:p.size||'',cat:p.cat||'أخرى',price:ep(p),old_price:(+p.disc>0)?p.price:null,discount:+p.disc>0?+p.disc:0,active:!!p.active,in_stock:p.stock==null||p.stock>0,image_url:p.img||null,description:p.desc||null,options:(p.opts&&p.opts.length)?p.opts.map(g=>({name:g.name,req:g.req,choices:(g.choices||[]).map(c=>typeof c=='string'?c:{label:c.label,...(+c.price>0?{price:+c.price}:{})})})):null,sort:i,updated_at:ts}));
   const up=b=>cApi('/rest/v1/products?on_conflict=code',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(b)});
   let rr=rows;for(let k=0;k<3;k++){try{await up(rr);break}catch(e){
     if(/description|options/.test(e.message)&&'options' in rr[0]){if(rr.some(x=>x.options||x.description))throw new Error('شغّل ملف supabase-product-options.sql مرة واحدة عشان الوصف والاختيارات يظهروا');rr=rr.map(({description,options,...z})=>z)}
@@ -451,7 +451,7 @@ async function doAccept(id,dv,dtype){
   else{let ch=false;if(!c.area&&o.area){c.area=o.area;ch=true}if(!c.address&&o.address){c.address=o.address;ch=true}if(ch)save('customers')}
   const st=DB.settings;
   sale={id:uid(),no:await nextNo(),date:new Date().toISOString(),userId:S.user.id,userName:S.user.name,customerId:c.id,customerName:c.name,
-   items:(o.items||[]).map(i=>{const p=prod(i.code);return{code:i.code,name:i.name,size:i.size||'',qty:i.qty,price:i.price,cost:p?p.cost:0,opts:(()=>{const om=(String(o.notes||'').match(/خيارات:\s*([^|]+)/)||[])[1]||'',key=(i.name+(i.size?' '+i.size:'')).trim();for(const sg of om.split(' ؛ ')){const t=sg.trim();if(t.startsWith(key+' (')&&t.endsWith(')'))return t.slice(key.length+2,-1)}return ''})()}}),
+   items:(o.items||[]).map(i=>{const p=prod(i.code);return{code:i.code,name:i.name,size:i.size||'',qty:i.qty,price:i.price,cost:p?(optCostText(p,optsOfItem(o,i))||p.cost):0,opts:optsOfItem(o,i)}}),
    subtotal:o.subtotal,discount:disc,delivery:+o.delivery||0,total:Math.round((o.subtotal-disc+(+o.delivery||0))*100)/100,pay:payMap(o.pay),
    note:['طلب موقع #'+o.no,o.pay_ref?'مرجع: '+o.pay_ref:'',o.notes||''].filter(Boolean).join(' | '),area:o.area||'',address:o.address||'',status:'ok',onlineId:o.id,src:srcName(o)};
   st.nextInvoice=sale.no+1;DB.sales.push(sale);
@@ -472,17 +472,20 @@ function setR(k){const d=new Date();S.to=ymd(d);S.from=k=='d'?ymd(d):k=='w'?ymd(
 const salesIn=()=>DB.sales.filter(s=>{const d=ymd(s.date);return d>=S.from&&d<=S.to&&(can('reports')||s.userId==S.user.id)});
 
 /* ================= البيع ================= */
-const cats=()=>[...new Set(DB.products.filter(p=>p.active).map(p=>p.cat||'أخرى'))];
+const cats=()=>{const a=new Set(DB.products.filter(p=>p.active).map(pcat));return catList().filter(c=>a.has(c))};
 PAGE.pos=()=>{$('#main').innerHTML=`<div class="pos"><div><input id="q" placeholder="🔍 ابحث باسم المنتج أو الكود" value="${esc(S.q)}" oninput="S.q=this.value;drawGrid()"><div class="chips" id="chips"></div><div class="grid" id="pgrid"></div></div><div class="card cartbox" id="cart"></div></div>`;drawGrid();drawCart()};
 function drawGrid(){
- $('#chips').innerHTML=['',...cats()].map(c=>`<a class="${S.cat==c?'on':''}" onclick="S.cat='${esc(c)}';drawGrid()">${c||'الكل'}</a>`).join('');
+ const CLs=catList();
+ $('#chips').innerHTML=['',...cats()].map(c=>`<a class="${S.cat==c?'on':''}" onclick="S.cat='${esc(c)}';drawGrid()">${c||'الكل'}${S.arr&&c?` <span onclick="event.stopPropagation();moveCatI(${CLs.indexOf(c)},-1)" title="قبل">▲</span> <span onclick="event.stopPropagation();moveCatI(${CLs.indexOf(c)},1)" title="بعد">▼</span>`:''}</a>`).join('')+`<a class="${S.arr?'on':''}" onclick="S.arr=!S.arr;drawGrid()">↕ ترتيب</a>`;
  const q=S.q.trim();
- const l=DB.products.filter(p=>p.active&&p.price>0&&(!S.cat||(p.cat||'أخرى')==S.cat)&&(!q||(p.name+' '+p.size+' '+p.code).includes(q)));
- $('#pgrid').innerHTML=l.map(p=>`<div class="pc ${p.stock!=null&&p.stock<=0?'out':''}" onclick="addCart('${p.code}')"><div class="pn">${esc(p.name)}</div><div class="ps">${esc(p.size)}</div><div class="pp">${(+p.disc>0)?`<s class="mut" style="font-weight:400">${n2(p.price)}</s> `:''}${n2(ep(p))} ج${(+p.disc>0)?` <span class="bd">-${p.disc}%</span>`:''}</div>${p.stock!=null?`<div class="st ${lowOf(p)?'lw':''}">متاح: ${p.stock}</div>`:''}</div>`).join('')||'<p class="mut">مفيش منتجات</p>'}
+ const l=plist().filter(p=>p.active&&p.price>0&&(!S.cat||(p.cat||'أخرى')==S.cat)&&(!q||(p.name+' '+p.size+' '+p.code).includes(q)));
+ $('#pgrid').innerHTML=l.map(p=>`<div class="pc ${p.stock!=null&&p.stock<=0?'out':''}" onclick="${S.arr?'':`addCart('${p.code}')`}">${S.arr?`<div style="display:flex;gap:4px;justify-content:center;margin-bottom:4px"><button class="btn s o" onclick="event.stopPropagation();moveProd('${p.code}',-1)">▲ قبل</button><button class="btn s o" onclick="event.stopPropagation();moveProd('${p.code}',1)">▼ بعد</button></div>`:''}<div class="pn">${esc(p.name)}</div><div class="ps">${esc(p.size)}</div><div class="pp">${(+p.disc>0)?`<s class="mut" style="font-weight:400">${n2(p.price)}</s> `:''}${n2(ep(p))} ج${(+p.disc>0)?` <span class="bd">-${p.disc}%</span>`:''}</div>${p.stock!=null?`<div class="st ${lowOf(p)?'lw':''}">متاح: ${p.stock}</div>`:''}</div>`).join('')||'<p class="mut">مفيش منتجات</p>'}
 /* ---- اختيارات المنتج في الكاشير ---- */
 let PSEL=null;
 const optGroupsP=p=>((p&&p.opts)||[]).map(g=>({...g,choices:(g.choices||[]).map(c=>typeof c=='string'?{label:c}:c).filter(c=>c&&c.label)})).filter(g=>g.name&&g.choices.length);
 function lineP(i){const p=prod(i.code);if(!p)return 0;const s=i.sel||{};for(const g of optGroupsP(p)){const c=g.choices.find(c=>c.label===s[g.name]);if(c&&+c.price>0)return Math.round(c.price*(100-(+p.disc||0)))/100}return ep(p)}
+function lineCost(i){const p=prod(i.code);if(!p)return 0;const s=i.sel||{};for(const g of optGroupsP(p)){const c=g.choices.find(c=>c.label===s[g.name]);if(c&&+c.cost>0)return +c.cost}return +p.cost||0}
+function optCostText(p,t){for(const seg of String(t||'').split('، ')){const k=seg.indexOf(': ');if(k<0)continue;const g=optGroupsP(p).find(g=>g.name===seg.slice(0,k)),c=g&&g.choices.find(c=>c.label===seg.slice(k+2));if(c&&+c.cost>0)return +c.cost}return 0}
 function lineOpts(i){const p=prod(i.code);if(!p)return '';const s=i.sel||{};return optGroupsP(p).map(g=>s[g.name]?g.name+': '+s[g.name]:'').filter(Boolean).join('، ')}
 const lineKey=(c,sel)=>c+'|'+Object.keys(sel||{}).sort().map(k=>k+'='+sel[k]).join(';');
 function cleanCart(){S.cart=S.cart.filter(i=>prod(i.code))}
@@ -519,7 +522,7 @@ async function checkout(){
  if(!S.cart.length)return;
  st.nextInvoice=no+1;
  const sale={id:uid(),no,date:new Date().toISOString(),userId:S.user.id,userName:S.user.name,customerId:c?c.id:'',customerName:c?c.name:'',
-  items:S.cart.map(i=>{const p=prod(i.code);return{code:p.code,name:p.name,size:p.size,qty:i.qty,price:lineP(i),cost:p.cost,opts:lineOpts(i)}}),
+  items:S.cart.map(i=>{const p=prod(i.code);return{code:p.code,name:p.name,size:p.size,qty:i.qty,price:lineP(i),cost:lineCost(i),opts:lineOpts(i)}}),
   subtotal:t.sub,discount:t.d,total:t.total,pay:S.pay,note:S.note,area:S.area.trim(),address:S.addr.trim(),status:'ok'};
  if(c){let ch=false;if(!c.area&&sale.area){c.area=sale.area;ch=true}if(!c.address&&sale.address){c.address=sale.address;ch=true}if(ch)save('customers')}
  DB.sales.push(sale);
@@ -557,20 +560,89 @@ function cancelSale(id){const s=DB.sales.find(x=>x.id==id);if(!s||!confirm(`إل
  save('sales','products','stocklog');schedSync();drawInv();toast('تم الإلغاء')}
 
 /* ================= المنتجات والمخزون ================= */
-PAGE.products=()=>{const lw=lowList();
- $('#main').innerHTML=`<div class="row"><button class="btn" onclick="prodModal()">+ منتج جديد</button><button class="btn o" onclick="prodXlsx()">Excel</button><button class="btn o" onclick="syncProducts(true)">☁️ رفع المنتجات للموقع</button></div>${lw.length?`<div class="banner" style="border-radius:8px;margin-bottom:10px">⚠️ مخزون منخفض: ${lw.map(p=>esc(p.name+' '+p.size)+' ('+p.stock+')').join('، ')}</div>`:''}<div class="card tw"><table><tr><th>صورة</th><th>الكود</th><th>المنتج</th><th>الحجم</th><th>السعر</th><th>التكلفة</th><th>الهامش</th><th>المخزون</th><th>نشط</th><th></th></tr>${DB.products.map(p=>`<tr><td>${p.img?`<img class="thumb" src="${esc(p.img)}" alt="">`:'<div class="thumb"></div>'}</td><td>${p.code}</td><td>${esc(p.name)}</td><td>${esc(p.size)}</td><td>${+p.disc>0?`<s class="mut">${n2(p.price)}</s> ${n2(ep(p))} <span class="bd">-${p.disc}%</span>`:n2(p.price)}</td><td>${n2(p.cost)}</td><td>${ep(p)?Math.round((ep(p)-p.cost)/ep(p)*100)+'%':''}</td><td class="${lowOf(p)?'st lw':''}">${p.stock==null?'<span class="mut">غير متابع</span>':p.stock}</td><td>${p.active?'نعم':'لا'}</td><td><button class="btn s o" onclick="prodModal('${p.code}')">تعديل</button> <button class="btn s" onclick="recv('${p.code}')">+ استلام</button> <button class="btn s r" onclick="delProd('${p.code}')">🗑 حذف</button></td></tr><tr><td colspan="10" style="padding:0;text-align:center;border:0"><button class="btn s o" style="padding:0 16px;line-height:1.2" title="إضافة منتج جديد في نفس التصنيف" onclick="prodAddAfter('${p.code}')">＋</button></td></tr>`).join('')}</table></div>`};
+PAGE.products=()=>{const lw=lowList(),L=plist(),cs=catList();
+ const rowH=(p,i,g)=>`<tr><td><input type="checkbox" ${PSELS.has(p.code)?'checked':''} onchange="togSel('${p.code}',this.checked)"></td><td style="white-space:nowrap"><button class="btn s o" ${i==0?'disabled':''} onclick="moveProd('${p.code}',-1)">▲</button><button class="btn s o" ${i==g.length-1?'disabled':''} onclick="moveProd('${p.code}',1)">▼</button></td><td>${p.img?`<img class="thumb" src="${esc(p.img)}" alt="">`:'<div class="thumb"></div>'}</td><td>${p.code}</td><td>${esc(p.name)}${chSum(p)}</td><td>${esc(p.size)}</td><td>${+p.disc>0?`<s class="mut">${n2(p.price)}</s> ${n2(ep(p))} <span class="bd">-${p.disc}%</span>`:n2(p.price)}</td><td>${n2(p.cost)}</td><td>${ep(p)?Math.round((ep(p)-p.cost)/ep(p)*100)+'%':''}</td><td class="${lowOf(p)?'st lw':''}">${p.stock==null?'<span class="mut">غير متابع</span>':p.stock}</td><td>${p.active?'نعم':'لا'}</td><td style="white-space:nowrap"><button class="btn s o" onclick="prodModal('${p.code}')">تعديل</button> <button class="btn s" onclick="recv('${p.code}')">+ استلام</button> <button class="btn s r" onclick="delProd('${p.code}')">🗑 حذف</button></td></tr><tr><td colspan="12" style="padding:0;text-align:center;border:0"><button class="btn s o" style="padding:0 16px;line-height:1.2" title="إضافة منتج جديد في نفس التصنيف" onclick="prodAddAfter('${p.code}')">＋</button></td></tr>`;
+ const body=cs.map((c,ci)=>{const g=L.filter(p=>pcat(p)===c);return `<tr><td><input type="checkbox" ${g.length&&g.every(p=>PSELS.has(p.code))?'checked':''} onchange="togCatI(${ci},this.checked)"></td><td colspan="11" style="background:#0000000d;font-weight:800">📁 ${esc(c)} (${g.length}) <button class="btn s o" ${ci==0?'disabled':''} onclick="moveCatI(${ci},-1)" title="رفع التصنيف">▲ تصنيف</button><button class="btn s o" ${ci==cs.length-1?'disabled':''} onclick="moveCatI(${ci},1)" title="تنزيل التصنيف">▼ تصنيف</button> <button class="btn s o" onclick="addInCat(${ci})">＋ منتج في التصنيف</button></td></tr>`+g.map((p,i)=>rowH(p,i,g)).join('')}).join('');
+ $('#main').innerHTML=`<div class="row"><button class="btn" onclick="prodModal()">+ منتج جديد</button><button class="btn o" onclick="prodXlsx()">Excel</button><button class="btn o" onclick="syncProducts(true)">☁️ رفع المنتجات للموقع</button><label style="margin-inline-start:8px"><input type="checkbox" onchange="selAll(this.checked)"> تحديد الكل</label></div><div id="selBar" class="row" style="display:none;align-items:center;gap:8px;position:sticky;top:0;z-index:5;background:#fff;padding:8px;border:2px solid #7d5a8e;border-radius:10px;margin:8px 0"><span>المحدد: <b>0</b></span><button class="btn s o" onclick="bulkMove(-1)">▲ فوق</button><button class="btn s o" onclick="bulkMove(1)">▼ تحت</button><button class="btn s o" onclick="bulkMoveCat()">📁 نقل لتصنيف</button><button class="btn s r" onclick="bulkDelete()">🗑 حذف المحدد</button><button class="btn s g" onclick="PSELS.clear();prodRR()">إلغاء التحديد</button></div>${lw.length?`<div class="banner" style="border-radius:8px;margin-bottom:10px">⚠️ مخزون منخفض: ${lw.map(p=>esc(p.name+' '+p.size)+' ('+p.stock+')').join('، ')}</div>`:''}<div class="card tw"><table><tr><th></th><th>ترتيب</th><th>صورة</th><th>الكود</th><th>المنتج</th><th>الحجم</th><th>السعر</th><th>التكلفة</th><th>الهامش</th><th>المخزون</th><th>نشط</th><th></th></tr>${body}</table></div>`;selBarDraw()};
+
+/* ===== ترتيب المنتجات والتصنيفات: ثابت ومتزامن (مش بيعتمد على مكان المنتج في القائمة) ===== */
+const pcat=p=>p.cat||'أخرى';
+const PSELS=new Set();
+let INORD=false;
+function ensureOrd(){if(INORD)return;INORD=true;try{ensureOrd2()}finally{INORD=false}}
+function ensureOrd2(){
+ const byCode=(a,b)=>(+String(a.code).slice(1)||0)-(+String(b.code).slice(1)||0);
+ const miss=DB.products.filter(p=>typeof p.ord!='number'||p.ordCat!==pcat(p));
+ if(!miss.length)return;
+ const mx=c=>Math.max(0,...DB.products.filter(x=>typeof x.ord=='number'&&x.ordCat===c&&pcat(x)===c&&x!==undefined&&!miss.includes(x)).map(x=>x.ord));
+ if(DB.products.every(p=>typeof p.ord!='number')){[...DB.products].sort(byCode).forEach((p,i)=>{p.ord=(i+1)*10;p.ordCat=pcat(p)})}
+ else miss.sort(byCode).forEach(p=>{p.ord=mx(pcat(p))+10;p.ordCat=pcat(p)});
+ const aft=DB.products.filter(p=>p._after);
+ for(const p of aft){const t=prod(p._after);delete p._after;
+  if(t&&pcat(t)===pcat(p)){p.ord=t.ord+0.5;const g=DB.products.filter(x=>pcat(x)===pcat(p)).sort((a,b)=>a.ord-b.ord);g.forEach((x,i)=>x.ord=(i+1)*10)}}
+ DB.settings.catOrder=catList();
+ save('products','settings')}
+function minOrd(c){return Math.min(...DB.products.filter(p=>pcat(p)===c).map(p=>typeof p.ord=='number'?p.ord:1e9))}
+function catList(){ensureOrd();const present=new Set(DB.products.map(pcat)),out=(DB.settings.catOrder||[]).filter(c=>present.has(c));
+ return [...out,...[...present].filter(c=>!out.includes(c)).sort((a,b)=>minOrd(a)-minOrd(b))]}
+function plist(){ensureOrd();const ci=new Map(catList().map((c,i)=>[c,i]));
+ return [...DB.products].sort((a,b)=>ci.get(pcat(a))-ci.get(pcat(b))||a.ord-b.ord||String(a.code).localeCompare(b.code))}
+const ordGrp=c=>plist().filter(p=>pcat(p)===c);
+function prodRR(){const y=scrollY;if(S.page=='pos')drawGrid();else{render();scrollTo(0,y)}}
+function afterOrder(sett){save('products');if(sett)save('settings');schedSync();prodRR()}
+function moveProd(code,d){const p=prod(code);if(!p)return;const g=ordGrp(pcat(p)),i=g.indexOf(p),j=i+d;if(j<0||j>=g.length)return;[g[i].ord,g[j].ord]=[g[j].ord,g[i].ord];afterOrder()}
+function moveCatI(i,d){const L=catList(),j=i+d;if(i<0||j<0||j>=L.length)return;[L[i],L[j]]=[L[j],L[i]];DB.settings.catOrder=L;afterOrder(true)}
+function addInCat(i){prodModal('',catList()[i])}
+function togSel(code,on){on?PSELS.add(code):PSELS.delete(code);selBarDraw()}
+function togCatI(i,on){ordGrp(catList()[i]).forEach(p=>on?PSELS.add(p.code):PSELS.delete(p.code));prodRR()}
+function selAll(on){DB.products.forEach(p=>on?PSELS.add(p.code):PSELS.delete(p.code));prodRR()}
+function selBarDraw(){const b=$('#selBar');if(!b)return;b.style.display=PSELS.size?'flex':'none';b.querySelector('b').textContent=PSELS.size}
+function bulkMove(d){if(!PSELS.size)return;
+ for(const c of catList()){const L=ordGrp(c),arr=[...L],sel=p=>PSELS.has(p.code);if(!L.some(sel))continue;
+  if(d<0){for(let i=1;i<arr.length;i++)if(sel(arr[i])&&!sel(arr[i-1]))[arr[i-1],arr[i]]=[arr[i],arr[i-1]]}
+  else{for(let i=arr.length-2;i>=0;i--)if(sel(arr[i])&&!sel(arr[i+1]))[arr[i+1],arr[i]]=[arr[i],arr[i+1]]}
+  const ords=L.map(p=>p.ord);arr.forEach((p,i)=>p.ord=ords[i])}
+ afterOrder()}
+function bulkMoveCat(){if(!PSELS.size)return;
+ modal(`<h3>نقل ${PSELS.size} منتج لتصنيف</h3><label>اسم التصنيف (اختار من الموجود أو اكتب جديد)</label><input id="mv_cat" list="cl2"><datalist id="cl2">${catList().map(c=>`<option value="${esc(c)}">`).join('')}</datalist><div class="row" style="margin-top:12px"><button class="btn" onclick="bulkMoveCatDo()">نقل</button><button class="btn g" onclick="closeModal()">إلغاء</button></div>`)}
+function bulkMoveCatDo(){const name=val('mv_cat');if(!name)return toast('اكتب اسم التصنيف');
+ const sel=plist().filter(p=>PSELS.has(p.code));let mx=Math.max(0,...DB.products.filter(p=>pcat(p)===name&&!PSELS.has(p.code)).map(p=>p.ord||0));
+ sel.forEach(p=>{p.cat=name;mx+=10;p.ord=mx;p.ordCat=name});
+ const L=catList();if(!(DB.settings.catOrder||[]).includes(name))DB.settings.catOrder=[...(DB.settings.catOrder||[]).filter(c=>L.includes(c)),name];
+ PSELS.clear();closeModal();afterOrder(true);toast('تم النقل')}
+async function cloudDelProd(code){if(!cloudOn())return;const u='/rest/v1/products?code=eq.'+encodeURIComponent(code);
+ try{await cApi(u,{method:'DELETE',headers:{Prefer:'return=minimal'}})}catch(e){try{await cApi(u,{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({active:false})})}catch(e2){toast('فشل حذف '+code+' من الموقع: '+e.message)}}}
+async function bulkDelete(){const codes=[...PSELS];if(!codes.length)return;
+ if(!confirm(`حذف ${codes.length} منتج نهائيًا؟\nالفواتير القديمة مش هتتأثر، والمنتجات هتتشال من الكاشير ومن الموقع.`))return;
+ DB.settings.prodMax=Math.max(DB.settings.prodMax||0,...codes.map(c=>+String(c).slice(1)||0));
+ DB.products=DB.products.filter(x=>!PSELS.has(x.code));if(Array.isArray(S.cart))S.cart=S.cart.filter(x=>!PSELS.has(x.code));
+ PSELS.clear();save('products','settings');for(const c of codes)await cloudDelProd(c);
+ schedPush();prodRR();toast('تم حذف '+codes.length+' منتج')}
+const mgOf=(pr,co)=>(+pr>0&&+co>0)?Math.round((pr-co)/pr*1000)/10:'';
+const chSum=p=>optGroupsP(p).map(g=>g.choices.map(c=>{const m=(+c.price>0&&+c.cost>0)?Math.round((c.price-c.cost)/c.price*100)+'%':'';return `<div class="mut" style="font-size:11px">${esc(g.name)}: ${esc(c.label)}${+c.price>0?' — '+n2(c.price):''}${+c.cost>0?' / تكلفة '+n2(c.cost):''}${m?' ('+m+')':''}</div>`}).join('')).join('');
+function baseCalc(f){const P=$('#f_price'),C=$('#f_cost'),M=$('#f_mg'),pr=+P.value,co=+C.value,m=M.value===''?null:+M.value;
+ if(f=='m'&&m!==null&&m<100){if(co>0)P.value=Math.round(co/(1-m/100)*100)/100;else if(pr>0)C.value=Math.round(pr*(1-m/100)*100)/100}else if(f!='m')M.value=mgOf(+P.value,+C.value)}
 let PROD_AFTER=null;
 function prodAddAfter(code){const p=prod(code);prodModal('',p?p.cat:'',code)}
 function prodModal(code,cat0,after){PROD_AFTER=after||null;const p=code?prod(code):{code:'',name:'',size:'',price:'',cost:'',stock:null,min:null,active:true,cat:cat0||''};
- OPT=JSON.parse(JSON.stringify(p.opts||[])).map(g=>({...g,choices:Array.isArray(g.choices)?g.choices.map(c=>typeof c=='string'?c:c.label+(+c.price>0?' = '+c.price:'')).join('\n'):(g.choices||'')}));
- modal(`<h3>${code?'تعديل منتج '+code:'منتج جديد'}</h3><label>اسم المنتج</label><input id="f_name" value="${esc(p.name)}"><div class="row"><div style="flex:1"><label>الحجم / النوع</label><input id="f_size" value="${esc(p.size)}"></div><div style="flex:1"><label>التصنيف</label><input id="f_cat" list="cl" value="${esc(p.cat)}"><datalist id="cl">${[...new Set(DB.products.map(x=>x.cat))].map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div></div><div class="row"><div style="flex:1"><label>سعر البيع</label><input id="f_price" type="number" value="${p.price}"></div><div style="flex:1"><label>التكلفة</label><input id="f_cost" type="number" value="${p.cost}"></div></div><div class="row"><div style="flex:1"><label>خصم % على المنتج (اختياري — بيظهر في الموقع والكاشير)</label><input id="f_disc" type="number" min="0" max="99" value="${p.disc||''}"></div></div><div class="row"><div style="flex:1"><label>المخزون (فاضي = غير متابع)</label><input id="f_stock" type="number" value="${p.stock??''}"></div><div style="flex:1"><label>حد التنبيه (فاضي = الافتراضي)</label><input id="f_min" type="number" value="${p.min??''}"></div></div><label>وصف المنتج (يظهر للعميل لما يفتح المنتج — فاضي = بدون وصف)</label><textarea id="f_desc" rows="3">${esc(p.desc||'')}</textarea><label>أقسام الاختيارات (اختيارية — العميل لازم يختار من كل قسم إجباري)</label><div id="optBox"></div><label>صورة المنتج (بتظهر في صفحة الطلب)</label><div class="row">${p.img?`<img class="thumb" src="${esc(p.img)}" alt="">`:''}<input type="file" id="f_img" accept="image/*"></div><label><input type="checkbox" id="f_act" ${p.active?'checked':''}> نشط (يظهر في البيع وفي الموقع)</label><div class="row" style="margin-top:12px"><button class="btn" id="svp" onclick="saveProd('${code||''}')">حفظ</button><button class="btn g" onclick="closeModal()">إلغاء</button></div>`);optDraw()}
+ OPT=JSON.parse(JSON.stringify(p.opts||[])).map(g=>({...g,choices:(Array.isArray(g.choices)?g.choices:[]).map(c=>typeof c=='string'?{label:c}:{...c})}));
+ modal(`<h3>${code?'تعديل منتج '+code:'منتج جديد'}</h3><label>اسم المنتج</label><input id="f_name" value="${esc(p.name)}"><div class="row"><div style="flex:1"><label>الحجم / النوع</label><input id="f_size" value="${esc(p.size)}"></div><div style="flex:1"><label>التصنيف</label><input id="f_cat" list="cl" value="${esc(p.cat)}"><datalist id="cl">${[...new Set(DB.products.map(x=>x.cat))].map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div></div><div class="row"><div style="flex:1"><label>سعر البيع</label><input id="f_price" type="number" value="${p.price}" oninput="baseCalc('p')"></div><div style="flex:1"><label>التكلفة</label><input id="f_cost" type="number" value="${p.cost}" oninput="baseCalc('c')"></div><div style="flex:1"><label>هامش %</label><input id="f_mg" type="number" value="${mgOf(p.price,p.cost)}" oninput="baseCalc('m')"></div></div><div class="row"><div style="flex:1"><label>خصم % على المنتج (اختياري — بيظهر في الموقع والكاشير)</label><input id="f_disc" type="number" min="0" max="99" value="${p.disc||''}"></div></div><div class="row"><div style="flex:1"><label>المخزون (فاضي = غير متابع)</label><input id="f_stock" type="number" value="${p.stock??''}"></div><div style="flex:1"><label>حد التنبيه (فاضي = الافتراضي)</label><input id="f_min" type="number" value="${p.min??''}"></div></div><label>وصف المنتج (يظهر للعميل لما يفتح المنتج — فاضي = بدون وصف)</label><textarea id="f_desc" rows="3">${esc(p.desc||'')}</textarea><label>أقسام الاختيارات (اختيارية — العميل لازم يختار من كل قسم إجباري)</label><div id="optBox"></div><label>صورة المنتج (بتظهر في صفحة الطلب)</label><div class="row">${p.img?`<img class="thumb" src="${esc(p.img)}" alt="">`:''}<input type="file" id="f_img" accept="image/*"></div><label><input type="checkbox" id="f_act" ${p.active?'checked':''}> نشط (يظهر في البيع وفي الموقع)</label><div class="row" style="margin-top:12px"><button class="btn" id="svp" onclick="saveProd('${code||''}')">حفظ</button><button class="btn g" onclick="closeModal()">إلغاء</button></div>`);optDraw()}
 let OPT=[];
 function optDraw(){const b=$('#optBox');if(!b)return;
- b.innerHTML=OPT.map((g,i)=>`<div class="card" style="background:#0000000a"><div class="row"><div style="flex:1"><label>اسم القسم (مثال: النوع)</label><input value="${esc(g.name||'')}" oninput="OPT[${i}].name=this.value"></div><button class="btn s r" onclick="optDel(${i})">حذف</button></div><label>الاختيارات — واحد في كل سطر، والسعر بعد = (اختياري). مثال: 500 جم = 90</label><textarea rows="3" oninput="OPT[${i}].choices=this.value">${esc(g.choices||'')}</textarea><label><input type="checkbox" ${g.req!==false?'checked':''} onchange="OPT[${i}].req=this.checked"> إجباري (العميل لازم يختار)</label></div>`).join('')+(OPT.length<6?'<button class="btn o" onclick="optAdd()">+ قسم اختيارات</button>':'')}
+ b.innerHTML=OPT.map((g,i)=>`<div class="card" style="background:#0000000a"><div class="row"><div style="flex:1"><label>اسم القسم (مثال: الوزن)</label><input value="${esc(g.name||'')}" oninput="OPT[${i}].name=this.value"></div><button class="btn s r" onclick="optDel(${i})">حذف القسم</button></div><div class="mut" style="font-size:12px">كل اختيار (وزن/نوع) له سعره وتكلفته وهامشه لوحده. السعر = سعر المنتج كامل. التكلفة والهامش للإدارة بس ومش بيظهروا للعملاء. فاضي = بياخد سعر/تكلفة المنتج الأساسية.</div>${(g.choices||[]).map((c,j)=>`<div class="row" style="align-items:flex-end;gap:6px"><div style="flex:2;min-width:110px"><label>الاختيار</label><input value="${esc(c.label||'')}" oninput="OPT[${i}].choices[${j}].label=this.value"></div><div style="flex:1;min-width:70px"><label>السعر</label><input id="ch_${i}_${j}_p" type="number" min="0" value="${c.price??''}" oninput="chCalc(${i},${j},'p',this.value)"></div><div style="flex:1;min-width:70px"><label>التكلفة</label><input id="ch_${i}_${j}_c" type="number" min="0" value="${c.cost??''}" oninput="chCalc(${i},${j},'c',this.value)"></div><div style="flex:1;min-width:70px"><label>هامش %</label><input id="ch_${i}_${j}_m" type="number" value="${mgOf(c.price,c.cost)}" oninput="chCalc(${i},${j},'m',this.value)"></div><button class="btn s r" onclick="chDel(${i},${j})">✕</button></div>`).join('')}<button class="btn s o" onclick="chAdd(${i})">+ اختيار</button><label><input type="checkbox" ${g.req!==false?'checked':''} onchange="OPT[${i}].req=this.checked"> إجباري (العميل لازم يختار)</label></div>`).join('')+(OPT.length<6?'<button class="btn o" onclick="optAdd()">+ قسم اختيارات</button>':'')}
+function chCalc(i,j,f,v){const c=OPT[i].choices[j],n=v===''?'':+v,E=k=>$('#ch_'+i+'_'+j+'_'+k);
+ if(f=='p')c.price=n;else if(f=='c')c.cost=n;
+ else if(n!==''&&n<100){if(c.cost>0){c.price=Math.round(c.cost/(1-n/100)*100)/100;E('p').value=c.price}else if(c.price>0){c.cost=Math.round(c.price*(1-n/100)*100)/100;E('c').value=c.cost}}
+ if(f!='m')E('m').value=mgOf(c.price,c.cost)}
+function chAdd(i){OPT[i].choices.push({label:'',price:'',cost:''});optDraw()}
+function chDel(i,j){OPT[i].choices.splice(j,1);optDraw()}
 function optPriceOk(p,v){const d=+p.disc||0,ok=x=>Math.abs(x-v)<0.011;return ok(+p.price)||(p.opts||[]).some(g=>(g.choices||[]).some(c=>+c.price>0&&(ok(+c.price)||ok(Math.round(c.price*(100-d))/100))))}
-function optAdd(){OPT.push({name:'',choices:'',req:true});optDraw()}
+function optsOfItem(o,i){const om=(String(o.notes||'').match(/خيارات:\s*([^|]+)/)||[])[1]||'',key=(i.name+(i.size?' '+i.size:'')).trim();for(const sg of om.split(' ؛ ')){const t=sg.trim();if(t.startsWith(key+' (')&&t.endsWith(')'))return t.slice(key.length+2,-1)}return ''}
+function optAdd(){OPT.push({name:'',req:true,choices:[{label:'',price:'',cost:''}]});optDraw()}
 function optDel(i){OPT.splice(i,1);optDraw()}
-function optCollect(){const out=[];for(const g of OPT){const name=String(g.name||'').trim(),ch=(()=>{const seen=new Set(),r=[];for(const ln of String(g.choices||'').split(/[\n,،]+/)){const t=ln.trim();if(!t)continue;const i=t.lastIndexOf('=');let label=t,price=0;if(i>0){label=t.slice(0,i).trim();price=+String(t.slice(i+1)).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^\d.]/g,'')||0}if(label&&!seen.has(label)){seen.add(label);r.push(price>0?{label,price}:{label})}}return r})();if(!name&&!ch.length)continue;if(!name||!ch.length)return null;out.push({name,req:g.req!==false,choices:ch})}return out}
+function optCollect(){const out=[];for(const g of OPT){const name=String(g.name||'').trim(),seen=new Set(),ch=[];
+ for(const c of (g.choices||[])){const label=String(c.label||'').trim();if(!label||seen.has(label))continue;seen.add(label);const o={label};if(+c.price>0)o.price=+c.price;if(+c.cost>0)o.cost=+c.cost;ch.push(o)}
+ if(!name&&!ch.length)continue;if(!name||!ch.length)return null;out.push({name,req:g.req!==false,choices:ch})}return out}
 async function saveProd(code){const name=val('f_name'),price=+val('f_price'),cost=+val('f_cost'),disc=val('f_disc')===''?0:+val('f_disc');
  if(!name||!(price>0))return toast('اكتب الاسم وسعر البيع');
  if(!(disc>=0&&disc<100))return toast('الخصم لازم يكون بين 0 و 99');
@@ -578,7 +650,7 @@ async function saveProd(code){const name=val('f_name'),price=+val('f_price'),cos
  const file=$('#f_img')&&$('#f_img').files[0];
  if(file&&!cloudOn())return toast('اربط الموقع الأول من الإعدادات عشان ترفع الصورة');
  let p=code?prod(code):null;
- if(!p){const mx=Math.max(DB.settings.prodMax||0,...DB.products.map(x=>+x.code.slice(1)||0));p={code:'P'+p2(mx+1)};const ai=PROD_AFTER?DB.products.findIndex(x=>x.code==PROD_AFTER):-1;if(ai>=0)DB.products.splice(ai+1,0,p);else DB.products.push(p)}
+ if(!p){const mx=Math.max(DB.settings.prodMax||0,...DB.products.map(x=>+x.code.slice(1)||0));p={code:'P'+p2(mx+1)};if(PROD_AFTER)p._after=PROD_AFTER;DB.products.push(p)}
  const ns=val('f_stock')===''?null:+val('f_stock');
  if(ns!==p.stock&&ns!=null)DB.stocklog.push({date:new Date().toISOString(),code:p.code,delta:ns-(p.stock||0),reason:'تعديل يدوي',user:S.user.name});
  Object.assign(p,{desc:val('f_desc'),opts,name,size:val('f_size'),cat:val('f_cat')||catOf(name),price,cost,disc,stock:ns,min:val('f_min')===''?null:+val('f_min'),active:$('#f_act').checked});
