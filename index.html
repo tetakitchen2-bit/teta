@@ -185,6 +185,9 @@ input,select,textarea,.in,.tools input{font-size:16px!important;max-width:100%}
 @media(max-width:520px){.pc .bt{flex-direction:column;align-items:stretch;text-align:center}.pc .bt .add,.pc .bt .stp{width:100%;justify-content:center}.price{font-size:21px}}
 /* ---------- صورة/فيديو الهيرو ---------- */
 .frame video{display:block;width:min(210px,52vw);aspect-ratio:1;object-fit:cover;border-radius:22px;background:#f3e9cf}
+.frame:not(.rdy){visibility:hidden}
+.frame.hasv{transform:none}
+.frame video{backface-visibility:hidden;transform:translateZ(0)}
 .frame.wide{display:block;max-width:min(780px,94vw);margin:0 auto;padding:6px;transform:none}
 .frame.wide img,.frame.wide video{width:100%;aspect-ratio:auto;max-height:68vh;object-fit:cover;border-radius:24px}
 </style>
@@ -318,19 +321,23 @@ function applySite(){
       ve.muted=ve.defaultMuted=ve.loop=ve.playsInline=ve.autoplay=true;ve.setAttribute('muted','');ve.setAttribute('playsinline','');ve.preload='metadata';ve.disablePictureInPicture=true;
       if(vd.poster)ve.poster=vd.poster;ve.innerHTML=`<source src="${esc(vd.url)}" type="${esc(vd.type||'video/mp4')}">`;fr.appendChild(ve);watchVid(ve)}}
   else{if(ve)ve.remove();if(vd&&vd.poster)hl.src=vd.poster;hl.style.display=''}
+  fr.classList.toggle('hasv',!!(vd&&heroVideoOk()));fr.classList.add('rdy');
   const secs={hero:$('.hero'),steps:$('.steps'),shop:$('#shop')};
   (st.order||['hero','steps','shop']).forEach((k,i)=>{if(secs[k])secs[k].style.order=i});
   secs.hero.style.display=sh.hero===false?'none':'';
   secs.steps.style.display=sh.steps===false?'none':'';
   document.querySelector('.tools').style.display=sh.search===false?'none':''}
 /* الفيديو: بيشتغل لوحده وبيعيد على طول، بس مش بيتحمّل لو النت ضعيف/توفير بيانات أو المستخدم مقلّل الحركة (بيظهر البوستر بس) */
-function heroVideoOk(){const c=navigator.connection||{};return !(c.saveData||/(^|-)2g$/.test(c.effectiveType||''))&&!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)}
+function heroVideoOk(){const c=navigator.connection||{};return !/(^|-)2g$/.test(c.effectiveType||'')}
 function watchVid(v){
-  const play=()=>{if(!v.isConnected)return;const p=v.play();if(p&&p.catch)p.catch(()=>{})};
+  const kick=()=>{['touchstart','pointerdown','scroll','keydown'].forEach(e=>removeEventListener(e,kick,true));if(v.isConnected&&!document.hidden)v.play().catch(()=>{})};
+  const play=()=>{if(!v.isConnected)return;const p=v.play();if(p&&p.catch)p.catch(()=>{['touchstart','pointerdown','scroll','keydown'].forEach(e=>addEventListener(e,kick,{capture:true,once:true,passive:true}))})};
+  v.addEventListener('ended',()=>{v.currentTime=0;play()});
   if('IntersectionObserver' in window)new IntersectionObserver(es=>es.forEach(e=>e.isIntersecting?play():v.pause()),{threshold:.1}).observe(v);else play();
   document.addEventListener('visibilitychange',()=>{if(!v.isConnected)return;document.hidden?v.pause():play()});
   const s=v.querySelector('source');if(s)s.addEventListener('error',()=>{v.remove();const hl=$('#heroLogo');hl.style.display=''});
   v.addEventListener('canplay',play,{once:true})}
+setTimeout(()=>{const f=document.querySelector('.frame');if(f)f.classList.add('rdy')},2500);
 let cdT;
 function drawCounter(){
   const c=SITE().counter||{},box=$('#cdBar');clearInterval(cdT);
