@@ -808,15 +808,17 @@ async function prepVideo(file,say,force){
  v.currentTime=Math.min(0.3,dur/3);await waitEv(v,'seeked');
  const ps=Math.min(1,1280/Math.max(W,H)),pc=document.createElement('canvas');pc.width=Math.round(W*ps);pc.height=Math.round(H*ps);pc.getContext('2d').drawImage(v,0,0,pc.width,pc.height);
  const poster=await new Promise(r=>pc.toBlob(r,'image/jpeg',.82)),okType=/^video\/(mp4|webm)/.test(file.type),orig={blob:file,type:(file.type||'video/mp4').split(';')[0],ext:/webm/.test(file.type)?'webm':'mp4',poster};
- if(okType&&file.size<=8*1048576&&!force){URL.revokeObjectURL(url);return{...orig,note:'الفيديو خفيف أصلًا فاترفع بجودته الأصلية'}}
+ if(okType&&file.size<=12*1048576&&!force){URL.revokeObjectURL(url);return{...orig,note:'الفيديو خفيف أصلًا فاترفع بجودته الأصلية'}}
  const mime=['video/mp4;codecs=avc1.640028','video/mp4;codecs=avc1','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported(t));
  if(!mime){if(file.size>25*1048576)throw new Error('الفيديو تقيل ('+Math.round(file.size/1048576)+' ميجا) والمتصفح ده مش بيضغط. جرّب كروم أو صغّره.');return{...orig,note:'المتصفح مش بيدعم الضغط، اترفع الأصلي'}}
  const cap=Math.min(1,1920/Math.max(W,H)),cw=Math.max(2,Math.round(W*cap/2)*2),ch=Math.max(2,Math.round(H*cap/2)*2),cv=document.createElement('canvas');cv.width=cw;cv.height=ch;const cx=cv.getContext('2d');
  const bps=Math.round(Math.min(5e6,Math.max(1.8e6,cw*ch*30*0.07))),rec=new MediaRecorder(cv.captureStream(30),{mimeType:mime,videoBitsPerSecond:bps}),chunks=[];
  rec.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};const stopped=new Promise(ok=>rec.onstop=ok);
  v.currentTime=0;await new Promise(r=>{const t=setTimeout(r,800);v.addEventListener('seeked',()=>{clearTimeout(t);r()},{once:true})});
- rec.start(1000);await v.play();let raf;const draw=()=>{cx.drawImage(v,0,0,cw,ch);say&&say('بيتضغط… '+Math.round(v.currentTime/dur*100)+'%');raf=requestAnimationFrame(draw)};draw();
- await waitEv(v,'ended');cancelAnimationFrame(raf);cx.drawImage(v,0,0,cw,ch);rec.stop();await stopped;URL.revokeObjectURL(url);
+ cx.drawImage(v,0,0,cw,ch);await new Promise(r=>requestAnimationFrame(r));rec.start(1000);await v.play();
+ let raf,vf,stop=false;const useV=!!v.requestVideoFrameCallback;
+ const draw=()=>{if(stop)return;cx.drawImage(v,0,0,cw,ch);say&&say('بيتضغط… '+Math.round(v.currentTime/dur*100)+'%');if(useV)vf=v.requestVideoFrameCallback(draw);else raf=requestAnimationFrame(draw)};draw();
+ await waitEv(v,'ended');stop=true;if(raf)cancelAnimationFrame(raf);cx.drawImage(v,0,0,cw,ch);await new Promise(r=>setTimeout(r,120));rec.stop();await stopped;URL.revokeObjectURL(url);
  const type=mime.split(';')[0],out=new Blob(chunks,{type});
  if(okType&&out.size>=file.size&&file.size<=25*1048576)return{...orig,note:'الأصلي أخف من المضغوط فاترفع الأصلي'};
  if(out.size>25*1048576)throw new Error('الفيديو لسه تقيل بعد الضغط ('+Math.round(out.size/1048576)+' ميجا). قصّره أو قلّل دقته.');
