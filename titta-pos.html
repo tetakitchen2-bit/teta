@@ -765,7 +765,7 @@ const SITE_DEF={theme:{rose:'#cf5559',roseD:'#a73a44',tan:'#dcbd86',tanD:'#b38f4
  text:{heroTitle:'',heroSub:'',cta:'',step1:'',step2:'',step3:'',search:'',closed:'',footer:''},
  show:{hero:true,steps:true,search:true,sprigs:true,gingham:true,visits:true},order:['hero','steps','shop'],heroImg:'',
  counter:{on:false,title:'',endAt:'',endText:'',bg:'#7d5a8e',fg:'#ffffff'},
- deliveryAreas:[],deliveryEta:'',freeOver:0,cashOn:true,cashLabel:'',pay:[],gateway:{provider:'',on:false,pub:''},css:'',promos:[],ads:{fb:'',tt:'',ga:'',aw:'',fbVerify:''},social:{fb:'',ig:'',tt:'',wa:'',waMsg:'',fab:false},siteUrl:'https://tetakitchen2-bit.github.io/teta/'};
+ deliveryAreas:[],deliveryEta:'',freeOver:0,cashOn:true,cashLabel:'',pay:[],gateway:{provider:'',on:false,pub:''},css:'',heroVideo:null,heroSize:'logo',promos:[],ads:{fb:'',tt:'',ga:'',aw:'',fbVerify:''},social:{fb:'',ig:'',tt:'',wa:'',waMsg:'',fab:false},siteUrl:'https://tetakitchen2-bit.github.io/teta/'};
 const SITE_FONTS=['Tajawal','Cairo','Almarai','Aref Ruqaa','Amiri','Changa','El Messiri','Reem Kufi','Lateef','Harmattan','Noto Kufi Arabic','Markazi Text','Rakkas','Lalezar'];
 function siteCfg(){const s=DB.settings.site||(DB.settings.site={});
  for(const k in SITE_DEF){const d=SITE_DEF[k];if(s[k]===undefined)s[k]=JSON.parse(JSON.stringify(d));else if(d&&typeof d=='object'&&!Array.isArray(d))s[k]={...d,...s[k]}}
@@ -785,6 +785,55 @@ const siteRe=()=>{const y=scrollY;go('site');scrollTo(0,y)};
 function siteAdd(k,pre){const s=siteCfg();s[k].push({icon:'💳',name:'',number:'',note:'',transfer:true,active:true,...(pre||{})});saveLocal('settings');siteRe()}
 function siteAreaAdd(){siteCfg().deliveryAreas.push({name:'',fee:0});saveLocal('settings');siteRe()}
 function siteAreaDel(i){siteCfg().deliveryAreas.splice(i,1);saveLocal('settings');siteRe()}
+
+/* ===== رفع صورة/فيديو الهيرو (Supabase Storage: bucket اسمه site-media) ===== */
+const waitEv=(el,ev)=>new Promise((ok,no)=>{el.addEventListener(ev,ok,{once:true});el.addEventListener('error',()=>no(new Error('الملف مش مدعوم أو بايظ')),{once:true})});
+const mediaBase=()=>cfg().url.replace(/\/$/,'')+'/storage/v1/object/';
+async function upMedia(blob,name,type){
+ const t=await cTok(),c=cfg(),r=await fetch(mediaBase()+'site-media/'+name,{method:'POST',headers:{apikey:c.key,Authorization:'Bearer '+t,'Content-Type':type,'x-upsert':'true','cache-control':'max-age=31536000'},body:blob});
+ if(!r.ok){let m='';try{m=(await r.json()).message||''}catch(e){}throw new Error(/bucket|not found|policy|row-level/i.test(m)?'شغّل ملف supabase-media.sql مرة واحدة في Supabase':(m||'فشل الرفع '+r.status))}
+ return mediaBase()+'public/site-media/'+name}
+async function delMedia(url){try{const n=String(url||'').split('/site-media/')[1];if(!n)return;const t=await cTok(),c=cfg();await fetch(mediaBase()+'site-media/'+n,{method:'DELETE',headers:{apikey:c.key,Authorization:'Bearer '+t}})}catch(e){}}
+async function prepImage(file){
+ if(/gif|svg/.test(file.type)){if(file.size>8*1048576)throw new Error('الصورة أكبر من 8 ميجا');return{blob:file,type:file.type,ext:file.type.includes('gif')?'gif':'svg'}}
+ const bmp=await createImageBitmap(file),k=Math.min(1,1920/Math.max(bmp.width,bmp.height)),c=document.createElement('canvas');
+ c.width=Math.round(bmp.width*k);c.height=Math.round(bmp.height*k);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
+ const blob=await new Promise(r=>c.toBlob(r,'image/webp',.88));return{blob,type:'image/webp',ext:'webp'}}
+async function prepVideo(file,say,force){
+ const url=URL.createObjectURL(file),v=document.createElement('video');v.muted=true;v.playsInline=true;v.preload='auto';v.src=url;
+ await waitEv(v,'loadedmetadata');if(v.duration===Infinity){v.currentTime=1e101;await new Promise(r=>{const t=setTimeout(r,2500);v.addEventListener('timeupdate',()=>{clearTimeout(t);r()},{once:true})});v.currentTime=0}
+ const dur=v.duration,W=v.videoWidth,H=v.videoHeight;
+ if(!(dur>0)||!W)throw new Error('مش قادر أقرا الفيديو');
+ if(dur>45)throw new Error('الفيديو أطول من 45 ثانية. قصّره (الأفضل 5–15 ثانية) عشان الموقع يفضل خفيف.');
+ v.currentTime=Math.min(0.3,dur/3);await waitEv(v,'seeked');
+ const ps=Math.min(1,1280/Math.max(W,H)),pc=document.createElement('canvas');pc.width=Math.round(W*ps);pc.height=Math.round(H*ps);pc.getContext('2d').drawImage(v,0,0,pc.width,pc.height);
+ const poster=await new Promise(r=>pc.toBlob(r,'image/jpeg',.82)),okType=/^video\/(mp4|webm)/.test(file.type),orig={blob:file,type:(file.type||'video/mp4').split(';')[0],ext:/webm/.test(file.type)?'webm':'mp4',poster};
+ if(okType&&file.size<=8*1048576&&!force){URL.revokeObjectURL(url);return{...orig,note:'الفيديو خفيف أصلًا فاترفع بجودته الأصلية'}}
+ const mime=['video/mp4;codecs=avc1.640028','video/mp4;codecs=avc1','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported(t));
+ if(!mime){if(file.size>25*1048576)throw new Error('الفيديو تقيل ('+Math.round(file.size/1048576)+' ميجا) والمتصفح ده مش بيضغط. جرّب كروم أو صغّره.');return{...orig,note:'المتصفح مش بيدعم الضغط، اترفع الأصلي'}}
+ const cap=Math.min(1,1920/Math.max(W,H)),cw=Math.max(2,Math.round(W*cap/2)*2),ch=Math.max(2,Math.round(H*cap/2)*2),cv=document.createElement('canvas');cv.width=cw;cv.height=ch;const cx=cv.getContext('2d');
+ const bps=Math.round(Math.min(5e6,Math.max(1.8e6,cw*ch*30*0.07))),rec=new MediaRecorder(cv.captureStream(30),{mimeType:mime,videoBitsPerSecond:bps}),chunks=[];
+ rec.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};const stopped=new Promise(ok=>rec.onstop=ok);
+ v.currentTime=0;await new Promise(r=>{const t=setTimeout(r,800);v.addEventListener('seeked',()=>{clearTimeout(t);r()},{once:true})});
+ rec.start(1000);await v.play();let raf;const draw=()=>{cx.drawImage(v,0,0,cw,ch);say&&say('بيتضغط… '+Math.round(v.currentTime/dur*100)+'%');raf=requestAnimationFrame(draw)};draw();
+ await waitEv(v,'ended');cancelAnimationFrame(raf);cx.drawImage(v,0,0,cw,ch);rec.stop();await stopped;URL.revokeObjectURL(url);
+ const type=mime.split(';')[0],out=new Blob(chunks,{type});
+ if(okType&&out.size>=file.size&&file.size<=25*1048576)return{...orig,note:'الأصلي أخف من المضغوط فاترفع الأصلي'};
+ if(out.size>25*1048576)throw new Error('الفيديو لسه تقيل بعد الضغط ('+Math.round(out.size/1048576)+' ميجا). قصّره أو قلّل دقته.');
+ return{blob:out,type,ext:type.includes('webm')?'webm':'mp4',poster,note:'اتضغط من '+(file.size/1048576).toFixed(1)+' إلى '+(out.size/1048576).toFixed(1)+' ميجا'}}
+async function heroUpload(inp){
+ const f=inp.files&&inp.files[0],say=t=>{const e=$('#hm_st');if(e)e.textContent=t};if(!f)return;
+ if(!cloudOn())return say('اربط الموقع بالسحابة من الإعدادات الأول.');
+ try{const s=siteCfg(),ts=Date.now(),old=[s.heroImg,s.heroVideo&&s.heroVideo.url,s.heroVideo&&s.heroVideo.poster];
+  if(f.type.startsWith('video/')){say('بيجهّز الفيديو…');const r=await prepVideo(f,say);say('بيرفع '+(r.blob.size/1048576).toFixed(1)+' ميجا…');
+   const url=await upMedia(r.blob,'hero-'+ts+'.'+r.ext,r.type),poster=await upMedia(r.poster,'hero-'+ts+'-poster.jpg','image/jpeg');
+   s.heroVideo={url,poster,type:r.type};s.heroImg='';say('✅ تم. '+(r.note||''))}
+  else if(f.type.startsWith('image/')){say('بيجهّز الصورة…');const r=await prepImage(f);say('بيرفع…');
+   s.heroImg=await upMedia(r.blob,'hero-'+ts+'.'+r.ext,r.type);s.heroVideo=null;say('✅ تم رفع الصورة ('+(r.blob.size/1024).toFixed(0)+' ك.ب)')}
+  else throw new Error('اختار صورة أو فيديو');
+  saveLocal('settings');old.filter(u=>u&&String(u).includes('/site-media/')).forEach(delMedia);sPost();setTimeout(siteRe,400)
+ }catch(e){say('❌ '+e.message)}finally{inp.value=''}}
+function heroClear(){const s=siteCfg();[s.heroImg,s.heroVideo&&s.heroVideo.url,s.heroVideo&&s.heroVideo.poster].forEach(u=>u&&String(u).includes('/site-media/')&&delMedia(u));s.heroImg='';s.heroVideo=null;saveLocal('settings');sPost();siteRe()}
 function promoAdd(){siteCfg().promos.push({name:'',on:true,type:'pct',value:10,minQty:3,all:true,codes:[],withCounter:true});saveLocal('settings');siteRe()}
 function promoDel(i){siteCfg().promos.splice(i,1);saveLocal('settings');siteRe()}
 function promoPick(i,code,on){const m=siteCfg().promos[i],a=m.codes||(m.codes=[]),k=a.indexOf(code);if(on&&k<0)a.push(code);if(!on&&k>=0)a.splice(k,1);saveLocal('settings');sPost()}
@@ -802,7 +851,7 @@ PAGE.site=()=>{const s=siteCfg(),t=s.theme,x=s.text,sh=s.show,c=s.counter,g=s.ga
  <div class="card"><h3>⏳ العداد التنازلي (للعروض المحدودة)</h3>${sCk('تشغيل العداد','counter.on',c.on)}${sIn('الكلام اللي فوق العداد (سبب العداد)','counter.title',c.title)}${row(sIn('ينتهي في','counter.endAt',c.endAt,'datetime-local')+sIn('رسالة بعد الانتهاء (اختياري، فاضي = يختفي)','counter.endText',c.endText))}${row(sIn('لون الخلفية','counter.bg',c.bg,'color','style="height:38px;padding:2px"')+sIn('لون الكتابة','counter.fg',c.fg,'color','style="height:38px;padding:2px"'))}</div>
  <div class="card"><h3>🎨 الألوان</h3>${row(col('الأساسي','rose')+col('الأساسي (داكن)','roseD')+col('الإطارات','tan')+col('الإطارات (داكن)','tanD'))}${row(col('لون النص','ink')+col('نص ثانوي','mut')+col('لون مميز (الخصم)','plum')+col('خلفية الصفحة','cream')+col('خلفية الكروت','paper'))}</div>
  <div class="card"><h3>🔤 الخطوط والأحجام</h3>${row(sSel('خط العناوين','theme.hand',t.hand,SITE_FONTS)+sSel('خط النصوص','theme.body',t.body,SITE_FONTS))}${row(num('حجم النص الأساسي (px)','theme.base',t.base,12,24)+num('حجم العنوان الرئيسي (px)','theme.h1',t.h1,30,120)+num('استدارة الحواف (px)','theme.radius',t.radius,0,40)+num('أقصى عرض للصفحة (px)','theme.maxw',t.maxw,700,1600)+num('أقل عرض لكارت المنتج (px)','theme.gridMin',t.gridMin,140,360))}</div>
- <div class="card"><h3>✏️ النصوص (فاضي = النص الأصلي)</h3>${sIn('العنوان الرئيسي','text.heroTitle',x.heroTitle)}${sIn('الوصف تحت العنوان','text.heroSub',x.heroSub)}${row(sIn('زرار الطلب','text.cta',x.cta)+sIn('خانة البحث','text.search',x.search))}${row(sIn('الخطوة ١','text.step1',x.step1)+sIn('الخطوة ٢','text.step2',x.step2)+sIn('الخطوة ٣','text.step3',x.step3))}${sIn('رسالة إيقاف الطلبات','text.closed',x.closed)}${sIn('سطر الفوتر','text.footer',x.footer)}${sIn('رابط صورة الهيرو (فاضي = اللوجو)','heroImg',s.heroImg,'text','dir="ltr"')}</div>
+ <div class="card"><h3>✏️ النصوص (فاضي = النص الأصلي)</h3>${sIn('العنوان الرئيسي','text.heroTitle',x.heroTitle)}${sIn('الوصف تحت العنوان','text.heroSub',x.heroSub)}${row(sIn('زرار الطلب','text.cta',x.cta)+sIn('خانة البحث','text.search',x.search))}${row(sIn('الخطوة ١','text.step1',x.step1)+sIn('الخطوة ٢','text.step2',x.step2)+sIn('الخطوة ٣','text.step3',x.step3))}${sIn('رسالة إيقاف الطلبات','text.closed',x.closed)}${sIn('سطر الفوتر','text.footer',x.footer)}<div class="card" style="background:#0000000a"><h3 style="margin:0">🖼️ صورة أو فيديو الهيرو (مكان اللوجو)</h3><p class="mut">ارفع صورة أو فيديو (mp4/webm). الفيديو بيشتغل لوحده وبدون صوت ومتكرر، وبيتضغط تلقائي لجودة عالية وحجم خفيف (الأفضل 5–15 ثانية). سيب التاب مفتوح أثناء الرفع. بعد الرفع اضغط «نشر».</p><input type="file" id="hm_file" accept="image/*,video/mp4,video/webm,video/quicktime" onchange="heroUpload(this)"><div id="hm_st" class="mut" style="margin:6px 0"></div>${s.heroVideo&&s.heroVideo.url?`<video src="${esc(s.heroVideo.url)}" poster="${esc(s.heroVideo.poster||'')}" muted loop autoplay playsinline style="max-width:220px;border-radius:12px"></video>`:(s.heroImg?`<img src="${esc(s.heroImg)}" style="max-width:220px;border-radius:12px" alt="">`:'')}<div class="row"><div style="flex:1;min-width:160px"><label>الحجم</label><select data-p="heroSize"><option value="logo" ${s.heroSize!=='wide'?'selected':''}>صغير (إطار اللوجو)</option><option value="wide" ${s.heroSize==='wide'?'selected':''}>كبير (عرض الصفحة)</option></select></div><button class="btn s r" onclick="heroClear()">إزالة (رجوع للوجو)</button></div></div></div>
  <div class="card"><h3>🧩 الأقسام وترتيبها</h3>${sCk('الهيرو','show.hero',sh.hero)}${sCk('خطوات الطلب','show.steps',sh.steps)}${sCk('خانة البحث','show.search',sh.search)}${sCk('زخرفة النباتات','show.sprigs',sh.sprigs)}${sCk('شريط الجينجهام','show.gingham',sh.gingham)}${sCk('عدّاد الزيارات آخر الصفحة','show.visits',sh.visits!==false)}<label>الترتيب</label>${s.order.map((k,i)=>`<div class="row"><b style="flex:1">${NM[k]}</b><button class="btn s o" onclick="siteMove(${i},-1)">↑</button><button class="btn s o" onclick="siteMove(${i},1)">↓</button></div>`).join('')}</div>
  <div class="card"><h3>🚚 إعدادات التوصيل</h3><p class="mut">أضف اسم كل منطقة وسعر التوصيل بالجنيه. العميل سيختار المنطقة أثناء الطلب وسيظهر السعر تلقائيًا.</p>${sIn('مدة التوصيل المتوقعة','deliveryEta',s.deliveryEta||'')}
  <label style="display:block;margin-top:10px">مناطق التوصيل وأسعارها</label>${(s.deliveryAreas||[]).map((a,i)=>`<div class="row" style="margin:8px 0"><input placeholder="اسم المنطقة" data-delivery-area="${i}" data-field="name" value="${esc(a.name||'')}" style="flex:2;min-width:120px"><input type="number" min="0" placeholder="السعر بالجنيه" data-delivery-area="${i}" data-field="fee" value="${esc(a.fee??0)}" style="flex:1;min-width:100px"><button class="btn s r" onclick="siteAreaDel(${i})">حذف</button></div>`).join('')}<button class="btn o" onclick="siteAreaAdd()">+ إضافة منطقة</button></div>
