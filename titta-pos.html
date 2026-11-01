@@ -128,7 +128,7 @@ function download(blob,name){const a=document.createElement('a');a.href=URL.crea
 /* ================= الإعدادات والبيانات الأولية ================= */
 const PERMS={pos:'البيع (الكاشير)',orders:'طلبات الموقع',discount:'إعطاء خصم',invoices:'عرض الفواتير',cancel:'إلغاء الفواتير',products:'المنتجات والمخزون',customers:'العملاء',expenses:'المصروفات',reports:'التقارير والأرباح',settings:'الإعدادات'};
 const ROLES={manager:['مدير',Object.keys(PERMS)],cashier:['كاشير',['pos','orders','invoices','customers']],accountant:['محاسب',['invoices','expenses','reports','customers']]};
-const PAGES=[['pos','🛒 البيع'],['orders','🌐 طلبات الموقع'],['invoices','🧾 الفواتير'],['products','📦 المنتجات والمخزون'],['customers','👥 العملاء'],['expenses','💸 المصروفات'],['reports','📊 التقارير'],['site','🎨 تصميم الموقع'],['settings','⚙️ الإعدادات']];
+const PAGES=[['pos','🛒 البيع'],['orders','🌐 طلبات الموقع'],['invoices','🧾 الفواتير'],['products','📦 المنتجات والمخزون'],['customers','👥 العملاء'],['expenses','💸 المصروفات'],['reports','📊 التقارير'],['site','🎨 تصميم الموقع'],['mkt','📣 التسويق'],['settings','⚙️ الإعدادات']];
 const DEF_SET={shopName:'تيتة',phone:'',address:'',footer:'شكراً لتعاملكم مع تيتة',logo:'',paper:'80',autoPrint:false,cc:'20',lowStock:5,nextInvoice:1,lastBackup:0,
  pays:['كاش','فودافون كاش','انستاباي','فيزا'],sources:['زيارة المحل','انستجرام','فيسبوك','تيك توك','واتساب','ترشيح من صديق','موقع تيتة'],expCats:['مواد خام','تغليف','رواتب','إيجار','مواصلات','تسويق','أخرى'],
  cloud:{url:'https://xvhdxtnixtdtzicrddlt.supabase.co',key:'sb_publishable__riAVMylXV233y6kwbs_sw_DB6sGqyC',email:'tetakitchen2@gmail.com',rt:''},
@@ -211,7 +211,7 @@ const go=p=>{S.page=p;render()};
 
 function render(){
  if(!S.user)return login();
- const pg=PAGES.filter(p=>can(p[0]=='site'?'settings':p[0]));
+ const pg=PAGES.filter(p=>can((p[0]=='site'||p[0]=='mkt')?'settings':p[0]));
  if(!can(S.page))S.page=pg[0]&&pg[0][0];
  const lw=lowList().length,np=CL.pend.length;
  const old=can('settings')&&DB.sales.length&&Date.now()-DB.settings.lastBackup>7*864e5;
@@ -836,6 +836,73 @@ async function heroUpload(inp){
   saveLocal('settings');old.filter(u=>u&&String(u).includes('/site-media/')).forEach(delMedia);sPost();setTimeout(siteRe,400)
  }catch(e){say('❌ '+e.message)}finally{inp.value=''}}
 function heroClear(){const s=siteCfg();[s.heroImg,s.heroVideo&&s.heroVideo.url,s.heroVideo&&s.heroVideo.poster].forEach(u=>u&&String(u).includes('/site-media/')&&delMedia(u));s.heroImg='';s.heroVideo=null;saveLocal('settings');sPost();siteRe()}
+
+/* ================= التسويق: رسائل واتساب/فيسبوك للعملاء (إرسال شبه يدوي = أمان للرقم والصفحة) ================= */
+const MK={sel:new Set(),sess:null};
+const FB_INBOX='https://business.facebook.com/latest/inbox/all';
+function mkCfg(){const m=DB.settings.mkt||(DB.settings.mkt={});
+ const d={text:'{أهلاً|مرحباً|يا أهلاً} {الاسم_الاول} 🌸\nعندنا في {المحل} عرض جديد على المربى والطحينة {يومين بس|لفترة محدودة}. اطلب من هنا: {الرابط}',ch:'wa',dmin:45,dmax:110,cap:40,cool:7,optline:true,flt:{buy:'bought',last:'',src:'',min:0},log:{}};
+ for(const k in d)if(m[k]===undefined)m[k]=JSON.parse(JSON.stringify(d[k]));m.flt={...d.flt,...m.flt};
+ m.dmin=Math.max(30,+m.dmin||45);m.dmax=Math.max(m.dmin,+m.dmax||110);m.cap=Math.min(100,Math.max(1,+m.cap||40));return m}
+const mkToday=()=>new Date().toISOString().slice(0,10);
+function mkPhone(ph){let p=String(ph||'').replace(/\D/g,'');if(p.startsWith('00'))p=p.slice(2);else if(p.startsWith('0'))p=DB.settings.cc+p.slice(1);return p.length>=10&&p.length<=15?p:''}
+function mkAudience(){const m=mkCfg(),f=m.flt,now=Date.now(),day=864e5;
+ return DB.customers.map(c=>({c,s:cStats(c.id),ph:mkPhone(c.phone)})).filter(({c,s,ph})=>{
+  if(!ph||c.mktOpt)return false;if(f.buy=='bought'&&!s.n)return false;if(f.src&&c.source!==f.src)return false;if(+f.min>0&&s.total<+f.min)return false;
+  if(f.last){const d=s.last?(now-new Date(s.last))/day:1e9;if(f.last=='30'&&d>30)return false;if(f.last=='idle30'&&d<=30)return false;if(f.last=='idle60'&&d<=60)return false}
+  if(m.cool>0&&c.mktLast&&(now-new Date(c.mktLast))/day<m.cool)return false;return true})}
+const SPIN=/\{([^{}|]+(?:\|[^{}|]+)+)\}/g;
+const mkSpin=t=>t.replace(SPIN,(_,g)=>{const a=g.split('|');return a[Math.floor(Math.random()*a.length)]});
+function mkMsg(c,m){let t=mkSpin(m.text||'');const first=String(c.name||'').trim().split(/\s+/)[0]||'';
+ t=t.replace(/\{الاسم_الاول\}/g,first).replace(/\{الاسم\}/g,c.name||'').replace(/\{المحل\}/g,DB.settings.shopName||'').replace(/\{الرابط\}/g,String((DB.settings.site&&DB.settings.site.siteUrl)||SITE_DEF.siteUrl).split('?')[0]+'?utm_source='+(m.ch=='wa'?'whatsapp':'facebook')+'&utm_medium=social&utm_campaign=broadcast');
+ if(m.optline)t+='\n\n(لو مش عايز توصلك عروض، رد بـ 0)';return t.trim()}
+function mkRisk(m,aud){const w=[];let r=0;const combos=(String(m.text).match(SPIN)||[]).reduce((a,g)=>a*(g.split('|').length),1),links=(String(m.text).match(/https?:\/\/\S+/g)||[]).length+(/\{الرابط\}/.test(m.text)?1:0);
+ if(m.cap>60){r+=2;w.push('الحد اليومي كبير ('+m.cap+'). الأأمن 20–40 رسالة في اليوم، وابدأ بـ 20 لو الرقم جديد.')}else if(m.cap>40){r+=1;w.push('الحد اليومي فوق 40، خليك حذر.')}
+ if(m.dmin<40){r+=1;w.push('الفاصل بين الرسايل قصير؛ الأفضل 45 ثانية أو أكتر.')}
+ if(!m.optline){r+=2;w.push('مفيش سطر إلغاء الاشتراك — ده بيزوّد بلاغات السبام.')}
+ if(combos<3){r+=2;w.push('الرسالة شبه ثابتة. استخدم صيغ بديلة زي {أهلاً|مرحباً} عشان الرسايل ما تتشابهش (دلوقتي '+combos+' صيغة).')}
+ if(links>1){r+=1;w.push('أكتر من لينك في الرسالة بيقلّل الأمان.')}
+ if(m.flt.buy!='bought'){r+=2;w.push('الجمهور فيه ناس ما اشتروش منك قبل كده؛ الرسايل لغير العملاء أكتر سبب للحظر.')}
+ if(String(m.text).length>600){r+=1;w.push('الرسالة طويلة.')}
+ if(!aud.length)w.push('مفيش عملاء مطابقين للفلتر.');
+ return{level:r>=4?['خطر 🔴','#c0392b']:r>=2?['متوسط 🟠','#d68910']:['آمن 🟢','#1e8449'],w,combos}}
+function mkRefresh(reset){const m=mkCfg(),aud=mkAudience();
+ MK.sel=reset?new Set(aud.map(x=>x.c.id)):new Set([...MK.sel].filter(id=>aud.some(x=>x.c.id==id)));
+ const today=m.log[mkToday()]||0,rk=mkRisk(m,aud),s1=aud.find(x=>MK.sel.has(x.c.id))||aud[0];
+ $('#mkRisk').innerHTML=`<div style="font-weight:800;color:${rk.level[1]}">مستوى الأمان: ${rk.level[0]}</div><div class="mut">اتبعت النهاردة ${today} من ${m.cap}</div>${rk.w.map(x=>`<div style="color:#b36b00">• ${esc(x)}</div>`).join('')}`;
+ $('#mkPrev').textContent=s1?mkMsg(s1.c,m):'اختار فلتر فيه عملاء عشان تشوف المعاينة';
+ $('#mkAud').innerHTML=`<div class="row"><b>${aud.length} عميل مطابق — المحدد ${MK.sel.size}</b><button class="btn s o" onclick="mkSelAll(true)">تحديد الكل</button><button class="btn s o" onclick="mkSelAll(false)">إلغاء الكل</button><button class="btn s o" onclick="mkOptList()">🚫 الموقوفين (${DB.customers.filter(c=>c.mktOpt).length})</button></div><div class="tw" style="max-height:300px;overflow:auto"><table><tr><th></th><th>الاسم</th><th>الرقم</th><th>فواتير</th><th>آخر شراء</th><th>آخر رسالة</th><th></th></tr>${aud.slice(0,300).map(({c,s})=>`<tr><td><input type="checkbox" ${MK.sel.has(c.id)?'checked':''} onchange="mkTog('${c.id}',this.checked)"></td><td>${esc(c.name)}</td><td dir="ltr">${esc(c.phone)}</td><td>${s.n}</td><td>${s.last?s.last.slice(0,10):'—'}</td><td>${c.mktLast?c.mktLast.slice(0,10):'—'}</td><td><button class="btn s r" onclick="mkOpt('${c.id}',true)" title="ما يتبعتلوش تاني">🚫</button></td></tr>`).join('')}</table></div>`;
+ $('#mkStart').textContent='▶ ابدأ جلسة الإرسال ('+MK.sel.size+' عميل)'}
+function mkTog(id,on){on?MK.sel.add(id):MK.sel.delete(id);mkRefresh(false)}
+function mkSelAll(on){MK.sel=on?new Set(mkAudience().map(x=>x.c.id)):new Set();mkRefresh(false);if(on)MK.sel=new Set(mkAudience().map(x=>x.c.id))}
+function mkOpt(id,on){const c=cust(id);if(!c)return;c.mktOpt=on;save('customers');mkRefresh(false);if(on)toast('اتوقفت الرسايل لـ '+c.name)}
+function mkOptList(){const L=DB.customers.filter(c=>c.mktOpt);modal(`<h3>🚫 عملاء موقوف التسويق ليهم</h3>${L.length?`<table>${L.map(c=>`<tr><td>${esc(c.name)}</td><td dir="ltr">${esc(c.phone)}</td><td><button class="btn s o" onclick="mkOpt('${c.id}',false);mkOptList()">إرجاع</button></td></tr>`).join('')}</table>`:'<p class="mut">لا يوجد</p>'}<button class="btn g" onclick="closeModal()">إغلاق</button>`)}
+function mkEvt(e){const el=e.target,k=el.dataset&&el.dataset.m;if(!k)return;const v=el.type=='checkbox'?el.checked:el.type=='number'?+el.value:el.value;
+ sPath(mkCfg(),k,v);mkCfg();clearTimeout(mkEvt.t);mkEvt.t=setTimeout(()=>saveLocal('settings'),500);mkRefresh(/^flt|^cool$/.test(k))}
+PAGE.mkt=()=>{const m=mkCfg(),f=m.flt;
+ $('#main').innerHTML=`<div class="card"><h3>🛡️ الأمان من الحظر</h3><div id="mkRisk"></div><p class="mut">الأداة بتجهّز رسالة باسم كل عميل وبتفتح محادثته، وإنت اللي بتضغط «إرسال» بنفسك — مفيش إرسال آلي، وده أهم حاجة بتحمي رقمك. الحدود اللي هنا إجبارية (فاصل ≥ 30 ث، وحد أقصى 100/يوم). الإرسال الآلي الكامل محتاج WhatsApp Business API وسيرفر وموافقة قوالب، ومش ممكن بأمان من صفحة عادية.</p></div>
+ <div class="card"><h3>👥 الجمهور</h3><div class="row"><div style="flex:1;min-width:150px"><label>مين؟</label><select data-m="flt.buy"><option value="bought" ${f.buy=='bought'?'selected':''}>عملاء اشتروا قبل كده (الأأمن)</option><option value="all" ${f.buy=='all'?'selected':''}>كل اللي عندهم رقم (خطر)</option></select></div><div style="flex:1;min-width:150px"><label>آخر شراء</label><select data-m="flt.last"><option value="" ${!f.last?'selected':''}>أي وقت</option><option value="30" ${f.last=='30'?'selected':''}>خلال آخر 30 يوم</option><option value="idle30" ${f.last=='idle30'?'selected':''}>مشتروش من +30 يوم</option><option value="idle60" ${f.last=='idle60'?'selected':''}>مشتروش من +60 يوم</option></select></div><div style="flex:1;min-width:150px"><label>المصدر</label><select data-m="flt.src"><option value="">الكل</option>${DB.settings.sources.map(x=>`<option ${f.src==x?'selected':''}>${esc(x)}</option>`).join('')}</select></div><div style="flex:1;min-width:120px"><label>مشتريات ≥ (ج)</label><input type="number" min="0" data-m="flt.min" value="${f.min}"></div><div style="flex:1;min-width:120px"><label>ما يتبعتلوش لو اتبعتله خلال (يوم)</label><input type="number" min="0" data-m="cool" value="${m.cool}"></div></div><div id="mkAud"></div></div>
+ <div class="card"><h3>✉️ الرسالة</h3><div class="row"><div style="flex:1;min-width:150px"><label>القناة</label><select data-m="ch"><option value="wa" ${m.ch=='wa'?'selected':''}>واتساب</option><option value="fb" ${m.ch=='fb'?'selected':''}>فيسبوك ماسنجر</option></select></div></div><label>نص الرسالة</label><textarea rows="6" data-m="text">${esc(m.text)}</textarea><p class="mut">متغيرات: {الاسم} {الاسم_الاول} {المحل} {الرابط} — وصيغ بديلة بالشكل {أهلاً|مرحباً|يا أهلاً} (بيختار واحدة عشوائي لكل عميل عشان الرسايل ما تتطابقش).</p><label><input type="checkbox" data-m="optline" ${m.optline?'checked':''}> إضافة سطر «رد بـ 0 لإيقاف الرسايل» (مهم للأمان)</label><label>معاينة (عميل عشوائي):</label><div id="mkPrev" style="white-space:pre-wrap;background:#0000000a;border-radius:10px;padding:10px"></div>${m.ch=='fb'?'<p class="mut" style="color:#b36b00">⚠️ فيسبوك: ميتا بتسمح للصفحة تراسل الشخص بس لو هو كلّم الصفحة خلال آخر 24 ساعة (أو عبر «رسائل التسويق» المعتمدة من ميتا). مفيش أداة تبعت لعملاء جداد آليًا من غير خطر حظر الصفحة؛ الأداة هنا بتجهّز الرسالة باسم العميل وتنسخها، وإنت تلصقها في محادثته في صندوق الوارد (للناس اللي كلموك).</p>':''}</div>
+ <div class="card"><h3>⏱️ سرعة وحدود الإرسال</h3><div class="row"><div style="flex:1;min-width:130px"><label>أقل فاصل (ثانية، ≥30)</label><input type="number" min="30" data-m="dmin" value="${m.dmin}"></div><div style="flex:1;min-width:130px"><label>أكبر فاصل (ثانية)</label><input type="number" min="30" data-m="dmax" value="${m.dmax}"></div><div style="flex:1;min-width:130px"><label>حد يومي (≤100)</label><input type="number" min="1" max="100" data-m="cap" value="${m.cap}"></div></div><p class="mut">الفاصل بيتغير عشوائي بين الأقل والأكبر عشان الإرسال يبان طبيعي. لو الرقم جديد ابدأ بـ 20 في اليوم وزوّد تدريجيًا.</p><button class="btn" id="mkStart" onclick="mkStart()">▶ ابدأ</button></div>`;
+ const mm=$('#main');mm.oninput=mm.onchange=mkEvt;mkRefresh(true)};
+function mkStart(){const m=mkCfg(),q=mkAudience().filter(x=>MK.sel.has(x.c.id)).map(x=>x.c.id);
+ if(!q.length)return toast('اختار عملاء الأول');if(!String(m.text).trim())return toast('اكتب الرسالة');
+ if((m.log[mkToday()]||0)>=m.cap)return toast('وصلت للحد اليومي ('+m.cap+')، كمّل بكرة عشان تحمي رقمك');
+ MK.sess={q,i:0,sent:0,wait:0,opened:false,msgFor:null};modal('<div id="sessBox"></div>');sessDraw();MK.sess.t=setInterval(sessTick,1000)}
+function sessDraw(){const S2=MK.sess,m=mkCfg(),b=$('#sessBox');if(!b||!S2)return;const today=m.log[mkToday()]||0;
+ if(S2.i>=S2.q.length||today>=m.cap){clearInterval(S2.t);b.innerHTML=`<h3>${S2.i>=S2.q.length?'خلصت القايمة ✅':'وصلت للحد اليومي 🛑'}</h3><p>اتبعت ${S2.sent} رسالة في الجلسة. اليوم: ${today}/${m.cap}.</p><button class="btn" onclick="closeModal()">تمام</button>`;return}
+ const c=cust(S2.q[S2.i]);if(!c){S2.i++;return sessDraw()}
+ if(S2.msgFor!==c.id){S2.msg=mkMsg(c,m);S2.msgFor=c.id;S2.opened=false}
+ b.innerHTML=`<h3>${S2.i+1} / ${S2.q.length} — ${esc(c.name)}</h3><div class="mut" dir="ltr">${esc(c.phone)}</div><div style="white-space:pre-wrap;background:#0000000a;border-radius:10px;padding:10px;margin:8px 0">${esc(S2.msg)}</div><div class="mut">اليوم: ${today}/${m.cap}</div><div class="row">${m.ch=='wa'?'<button class="btn" id="sOpen" onclick="sessOpen()">📲 افتح واتساب</button>':`<button class="btn" id="sOpen" onclick="sessCopy()">📋 انسخ الرسالة</button><a class="btn o" href="${FB_INBOX}" target="_blank" rel="noopener">افتح صندوق الفيسبوك</a>`}<button class="btn" id="sDone" onclick="sessDone()" ${S2.opened?'':'disabled'}>✅ تم الإرسال</button><button class="btn o" onclick="sessSkip()">⏭ تخطي</button><button class="btn s r" onclick="sessOpt()">🚫 طلب إيقاف</button></div><div id="sWait" class="mut" style="margin-top:6px"></div>`;sessTick()}
+function sessTick(){const S2=MK.sess;if(!S2||!$('#sessBox')){S2&&clearInterval(S2.t);return}const left=Math.ceil((S2.wait-Date.now())/1000),o=$('#sOpen'),w=$('#sWait');
+ if(left>0){if(o)o.disabled=true;if(w)w.textContent='⏳ استنى '+left+' ثانية قبل الرسالة اللي بعدها (حماية لرقمك/صفحتك من الحظر)'}else{if(o)o.disabled=false;if(w)w.textContent=''}}
+function sessOpen(){const S2=MK.sess,c=cust(S2.q[S2.i]);S2.opened=true;window.open('https://wa.me/'+mkPhone(c.phone)+'?text='+encodeURIComponent(S2.msg),'_blank');const d=$('#sDone');if(d)d.disabled=false}
+function sessCopy(){const S2=MK.sess;navigator.clipboard.writeText(S2.msg).then(()=>toast('تم النسخ'));S2.opened=true;const d=$('#sDone');if(d)d.disabled=false}
+function sessDone(){const S2=MK.sess,m=mkCfg(),c=cust(S2.q[S2.i]),k=mkToday();c.mktLast=new Date().toISOString();c.mktCh=m.ch;
+ m.log[k]=(m.log[k]||0)+1;Object.keys(m.log).sort().slice(0,-40).forEach(x=>delete m.log[x]);S2.sent++;S2.i++;
+ S2.wait=Date.now()+(m.dmin+Math.random()*(m.dmax-m.dmin))*1000;save('customers','settings');sessDraw()}
+function sessSkip(){MK.sess.i++;sessDraw()}
+function sessOpt(){const S2=MK.sess,c=cust(S2.q[S2.i]);if(c){c.mktOpt=true;save('customers')}S2.i++;sessDraw()}
 function promoAdd(){siteCfg().promos.push({name:'',on:true,type:'pct',value:10,minQty:3,all:true,codes:[],withCounter:true});saveLocal('settings');siteRe()}
 function promoDel(i){siteCfg().promos.splice(i,1);saveLocal('settings');siteRe()}
 function promoPick(i,code,on){const m=siteCfg().promos[i],a=m.codes||(m.codes=[]),k=a.indexOf(code);if(on&&k<0)a.push(code);if(!on&&k>=0)a.splice(k,1);saveLocal('settings');sPost()}
