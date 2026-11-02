@@ -81,6 +81,15 @@ h3{margin:0 0 8px}
 .pill.on{background:#e8f5e9;color:var(--ok)}.pill.off{background:#fdecea;color:#c62828}
 @media(max-width:850px){.pos{grid-template-columns:1fr}.cartbox{position:static}.top .logo{display:none}}
 @media(max-width:600px){.wrap{padding:8px}th,td{padding:5px 6px;font-size:13px}.top nav a{padding:13px 9px}.grid{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}.card{padding:10px}}
+
+/* ---- منع الإزاحة لليمين على الموبايل ---- */
+html,body{max-width:100%;overflow-x:clip}
+@supports not (overflow-x:clip){body{overflow-x:hidden}}
+.wrap{min-width:0}
+.pos>*{min-width:0}
+.chips{max-width:100%}
+input,select,textarea{max-width:100%}
+.card{min-width:0}
 </style>
 </head>
 <body>
