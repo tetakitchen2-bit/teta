@@ -265,7 +265,7 @@ function toast(m){const t=$('#toast');t.textContent=m;t.className='show';clearTi
 const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
 
-const S={products:[],shop:{shop_name:'تيتة',min_order:0,accepting:true},cart:lsGet('tt_cart',{}),opts:lsGet('tt_opts',{}),pm:null,cat:'',q:'',view:'cart',pay:'cash',busy:false,err:'',done:null,
+const S={coupon:null,cpErr:'',products:[],shop:{shop_name:'تيتة',min_order:0,accepting:true},cart:lsGet('tt_cart',{}),opts:lsGet('tt_opts',{}),pm:null,cat:'',q:'',view:'cart',pay:'cash',busy:false,err:'',done:null,
   f:lsGet('tt_cust',{name:'',phone:'',area:'',address:'',notes:'',ref:''})};
 const prod=c=>S.products.find(p=>p.code===c);
 const saveCart=()=>lsSet('tt_cart',S.cart);
@@ -421,7 +421,14 @@ function drawSocial(){
 const counterOn=()=>{const c=SITE().counter||{},e=c.endAt?new Date(c.endAt).getTime():0;return !!c.on&&e>Date.now()};
 const promoActive=pr=>pr&&pr.on!==false&&(pr.withCounter===false||counterOn());
 const origPrice=p=>+p.old_price>+p.price?+p.old_price:+p.price;
+const cpOrig=()=>items().reduce((a,x)=>a+unitOrig(x.p)*x.q,0);
+function cpCalc(){
+  const c=S.coupon;if(!c)return null;const its=items();if(!its.length)return null;
+  const orig=cpOrig();if(orig<(+c.min||0))return null;
+  const cur=sub(),disc=Math.round(Math.min(orig,c.kind=='egp'?(+c.value||0):orig*(+c.value||0)/100)*100)/100,after=orig-disc;
+  return{name:'كود '+c.code,d:Math.round((cur-after)*100)/100,disc,adj:Math.round((orig-cur)*100)/100,codes:its.map(x=>x.p.code),coupon:true}}
 function promoCalc(){
+  const cc=cpCalc();if(cc)return cc;
   const its=items();if(!its.length)return null;let best=null;
   for(const pr of (SITE().promos||[]).filter(promoActive)){
     const sel=its.filter(x=>pr.all!==false||(pr.codes||[]).includes(x.p.code));
@@ -434,12 +441,12 @@ function promoCalc(){
 const promoD=()=>(promoCalc()||{d:0}).d;
 const netTot=()=>Math.round((sub()-promoD()+delivery())*100)/100;
 function promoHint(){
-  const its=items();
+  const its=items();if(S.coupon)return '';
   for(const pr of (SITE().promos||[]).filter(promoActive)){
     const q=its.filter(x=>pr.all!==false||(pr.codes||[]).includes(x.p.code)).reduce((a,x)=>a+x.q,0),m=+pr.minQty||1;
     if(q>0&&q<m)return `<div class="note">🏷️ ضيف ${m-q} منتج كمان وخد خصم ${pr.type=='egp'?n2(+pr.value)+' ج':(+pr.value)+'%'}${pr.name?' ('+esc(pr.name)+')':''}</div>`}
   return ''}
-const promoNote=()=>{const pc=promoCalc();return pc?'خصم العرض: '+String(pc.name).replace(/[|—]/g,' ')+' — '+pc.disc+' ج':''};
+const promoNote=()=>{const pc=promoCalc();return pc?(pc.coupon?'كود خصم: ['+S.coupon.code+'] | ':'')+'خصم العرض: '+String(pc.name).replace(/[|—]/g,' ')+' — '+pc.disc+' ج':''};
 /*PROMO_END*/
 
 /* ====== وصف المنتج واختياراته (إجبارية) ====== */
@@ -571,8 +578,20 @@ function drawDrawer(){
   <label class="f">صورة التحويل (اختياري لو كتبت الرقم)</label><input class="in" id="f_rec" type="file" accept="image/*">`:''}
   ${S.err?`<div class="err">${esc(S.err)}</div>`:''}`;
   foot.innerHTML=totHTML()+`<button class="btn" id="sendBtn" onclick="submitOrder()" ${S.busy?'disabled':''}>${S.busy?'جاري الإرسال...':'✔ تأكيد الطلب'}</button><button class="btn sec2" onclick="S.view='cart';drawDrawer()">← رجوع للسلة</button>`}
+const cpBox=()=>{if(SITE().couponBox===false||!items().length)return '';const c=S.coupon,pc=cpCalc();
+  if(c)return `<div class="note" style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span>🎟️ كود <b>${esc(c.code)}</b> ${pc?'متطبق (بدل أي خصم تاني)':'— الحد الأدنى '+n2(c.min)+' ج'}</span><button class="btn sec2" style="width:auto;padding:4px 12px" onclick="cpRemove()">إلغاء</button></div>`;
+  return `<div style="display:flex;gap:6px;margin:8px 0"><input id="cpIn" dir="ltr" placeholder="عندك كود خصم؟" autocomplete="off" style="flex:1;min-width:0;text-transform:uppercase" onkeydown="if(event.key=='Enter'){event.preventDefault();cpApply()}"><button class="btn sec2" style="width:auto;padding:8px 14px" onclick="cpApply()">تطبيق</button></div>${S.cpErr?`<div class="note" style="color:#b3261e">${esc(S.cpErr)}</div>`:''}`};
+function cpRedraw(){if(S.view=='form')readForm();drawDrawer();updCart()}
+function cpRemove(){S.coupon=null;S.cpErr='';cpRedraw()}
+async function cpCheck(code){
+  const r=await api('/rest/v1/rpc/check_coupon',{method:'POST',body:JSON.stringify({p_code:code,p_subtotal:cpOrig()})});return r}
+async function cpApply(){
+  const code=String(($('#cpIn')||{}).value||'').trim();if(!code)return;
+  try{const r=await cpCheck(code);if(r&&r.ok){S.coupon={code:r.code,kind:r.kind,value:+r.value,min:+r.min||0};S.cpErr='';toast('تم تطبيق الكود ✔')}else{S.cpErr=(r&&r.msg)||'الكود غير صحيح'}}
+  catch(e){S.cpErr='مقدرناش نتأكد من الكود، جرّب تاني'}
+  cpRedraw()}
 function totHTML(){const pc=promoCalc(),d=delivery(),min=+S.shop.min_order||0;
-  return `<div class="tot"><div><span>المنتجات</span><span>${n2(sub()+(pc?pc.adj:0))} ج</span></div>${pc&&pc.disc>0?`<div style="color:var(--plum)"><span>🏷️ ${esc(pc.name)}${pc.adj>0?' (بدل خصم المنتج)':''}</span><span>- ${n2(pc.disc)} ج</span></div>`:''}${d>0?`<div><span>التوصيل</span><span>${n2(d)} ج</span></div>`:''}<div class="g"><span>الإجمالي</span><span>${n2(sub()-promoD()+d)} ج</span></div></div>${promoHint()}${min&&sub()<min?`<div class="note">الحد الأدنى للطلب ${n2(min)} ج</div>`:''}`}
+  return cpBox()+`<div class="tot"><div><span>المنتجات</span><span>${n2(sub()+(pc?pc.adj:0))} ج</span></div>${pc&&pc.disc>0?`<div style="color:var(--plum)"><span>🏷️ ${esc(pc.name)}${pc.adj>0?' (بدل خصم المنتج)':''}</span><span>- ${n2(pc.disc)} ج</span></div>`:''}${d>0?`<div><span>التوصيل</span><span>${n2(d)} ج</span></div>`:''}<div class="g"><span>الإجمالي</span><span>${n2(sub()-promoD()+d)} ج</span></div></div>${promoHint()}${min&&sub()<min?`<div class="note">الحد الأدنى للطلب ${n2(min)} ج</div>`:''}`}
 function readForm(){const g=id=>($('#'+id)?.value??'').trim();
   S.f={name:g('f_name'),phone:g('f_phone'),area:g('f_area'),address:g('f_addr'),notes:g('f_notes'),ref:$('#f_ref')?g('f_ref'):S.f.ref};lsSet('tt_cust',{...S.f,ref:''})}
 function setPay(k){readForm();S.pay=k;S.err='';drawDrawer()}
@@ -600,6 +619,9 @@ async function submitOrder(){
   if(tr&&!f.ref&&!file)return fail('اكتب رقم العملية أو ارفع صورة التحويل');
   S.busy=true;S.err='';drawDrawer();
   try{
+    if(S.coupon){const r=await cpCheck(S.coupon.code);
+      if(!r||!r.ok){S.coupon=null;S.cpErr='';throw new Error(((r&&r.msg)||'الكود لم يعد صالحًا')+' — اتشال من الطلب، راجع الإجمالي وأكّد تاني')}
+      S.coupon={code:r.code,kind:r.kind,value:+r.value,min:+r.min||0}}
     let receipt='';
     if(tr&&file){try{const b=await blobOf(file,1100,.75),name=rid()+'.jpg';
       const r=await fetch(`${SB_URL}/storage/v1/object/receipts/${name}`,{method:'POST',headers:{apikey:SB_KEY,'Content-Type':'image/jpeg'},body:b});
@@ -610,7 +632,7 @@ async function submitOrder(){
       p_name:f.name,p_phone:f.phone,p_area:f.area,p_address:f.address,p_notes:[f.notes,shipNote(),promoNote(),optsNote(),optPriceNote(),attrNote()].filter(Boolean).join(' | '),p_pay:payName,p_pay_ref:f.ref||'',p_receipt:receipt,
       p_items:items().map(x=>({code:x.p.code,qty:x.q}))})});
     S.done={...res,delivery:delivery(),total:netTot(),promo:(promoCalc()||{disc:0}).disc,promoName:(promoCalc()||{}).name||'',pay:payName,ref:f.ref,name:f.name,phone:f.phone,area:f.area,address:f.address,notes:f.notes,lines:items().map(x=>({n:x.p.name+' '+(x.p.size||'')+(hasOpts(x.p)?' ('+optText(x.p)+')':''),q:x.q,t:(((promoCalc()||{codes:[]}).codes.includes(x.p.code))?unitOrig(x.p):unit(x.p))*x.q}))};
-    track('Purchase',{value:S.done.total,id:'TT'+S.done.no,items:cartItemsT()});S.cart={};saveCart();S.view='done';
+    track('Purchase',{value:S.done.total,id:'TT'+S.done.no,items:cartItemsT()});S.cart={};S.coupon=null;saveCart();S.view='done';
     for(const p of S.products){const el=$('#c-'+p.code);if(el)el.innerHTML=ctl(p)}
     updCart()
   }catch(e){S.err=e.message||'حصلت مشكلة، حاول تاني'}
