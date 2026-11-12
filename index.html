@@ -584,7 +584,7 @@ const cpBox=()=>{if(SITE().couponBox===false||!items().length)return '';const c=
 function cpRedraw(){if(S.view=='form')readForm();drawDrawer();updCart()}
 function cpRemove(){S.coupon=null;S.cpErr='';cpRedraw()}
 async function cpCheck(code){
-  const r=await api('/rest/v1/rpc/check_coupon',{method:'POST',body:JSON.stringify({p_code:code,p_subtotal:cpOrig()})});return r}
+  const r=await api('/rest/v1/rpc/check_coupon',{method:'POST',body:JSON.stringify({p_code:code,p_subtotal:cpOrig(),p_phone:(S.f&&S.f.phone)||null})});return r}
 async function cpApply(){
   const code=String(($('#cpIn')||{}).value||'').trim();if(!code)return;
   try{const r=await cpCheck(code);if(r&&r.ok){S.coupon={code:r.code,kind:r.kind,value:+r.value,min:+r.min||0};S.cpErr='';toast('تم تطبيق الكود ✔')}else{S.cpErr=(r&&r.msg)||'الكود غير صحيح'}}
@@ -632,6 +632,7 @@ async function submitOrder(){
       p_name:f.name,p_phone:f.phone,p_area:f.area,p_address:f.address,p_notes:[f.notes,shipNote(),promoNote(),optsNote(),optPriceNote(),attrNote()].filter(Boolean).join(' | '),p_pay:payName,p_pay_ref:f.ref||'',p_receipt:receipt,
       p_items:items().map(x=>({code:x.p.code,qty:x.q}))})});
     S.done={...res,delivery:delivery(),total:netTot(),promo:(promoCalc()||{disc:0}).disc,promoName:(promoCalc()||{}).name||'',pay:payName,ref:f.ref,name:f.name,phone:f.phone,area:f.area,address:f.address,notes:f.notes,lines:items().map(x=>({n:x.p.name+' '+(x.p.size||'')+(hasOpts(x.p)?' ('+optText(x.p)+')':''),q:x.q,t:(((promoCalc()||{codes:[]}).codes.includes(x.p.code))?unitOrig(x.p):unit(x.p))*x.q}))};
+    if(S.coupon){try{await api('/rest/v1/rpc/coupon_used',{method:'POST',body:JSON.stringify({p_code:S.coupon.code,p_name:f.name,p_phone:f.phone,p_src:attrNote().replace('مصدر: ',''),p_order_no:res.no||null})})}catch(e){}}
     track('Purchase',{value:S.done.total,id:'TT'+S.done.no,items:cartItemsT()});S.cart={};S.coupon=null;saveCart();S.view='done';
     for(const p of S.products){const el=$('#c-'+p.code);if(el)el.innerHTML=ctl(p)}
     updCart()
