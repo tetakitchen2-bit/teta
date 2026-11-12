@@ -743,18 +743,27 @@ function repXlsx(){const r=repData();
 
 const _repV=PAGE.reports;
 PAGE.reports=()=>{_repV();$('#main').insertAdjacentHTML('beforeend','<div class="card" id="visCard"><h3>👀 زيارات الموقع</h3><div id="visBox" class="mut">جاري التحميل...</div></div><div class="card"><h3>🎟️ استخدام أكواد الخصم</h3><div id="cpuBox" class="mut">جاري التحميل...</div></div>');loadVisits();loadCpUses()};
+const GEO=(()=>{try{return JSON.parse(localStorage.getItem('geo_c')||'{}')}catch(e){return{}}})();
+const geoTx=g=>g?[g.country,(g.region||'').replace(/ Governorate$/i,''),g.city&&g.city!==g.region?g.city:''].filter(Boolean).join(' · ')||'—':'…';
+async function geoFill(){
+ const els=[...document.querySelectorAll('td.geo')];els.forEach(e=>{const g=GEO[e.dataset.ip];if(g)e.textContent=geoTx(g)});
+ const todo=[...new Set(els.map(e=>e.dataset.ip).filter(ip=>ip&&ip!='unknown'&&!GEO[ip]))].slice(0,60);
+ for(const ip of todo){try{const r=await fetch('https://ipwho.is/'+encodeURIComponent(ip)),j=await r.json();
+   GEO[ip]=j&&j.success?{country:j.country,region:j.region,city:j.city}:{country:'غير معروف'};
+   try{localStorage.setItem('geo_c',JSON.stringify(GEO))}catch(e){}
+   document.querySelectorAll('td.geo').forEach(e=>{if(e.dataset.ip==ip)e.textContent=geoTx(GEO[ip])})}catch(e){break}}}
 async function loadCpUses(){const b=$('#cpuBox');if(!b)return;
  if(!cloudOn()){b.textContent='اربط الموقع الأول.';return}
  try{const l=await cApi('/rest/v1/coupon_uses?select=*&order=at.desc&limit=300')||[],by={};l.forEach(r=>{by[r.code]=(by[r.code]||0)+1});
   b.innerHTML=`<div class="kpis"><div class="kpi"><b>${l.length}</b>إجمالي الاستخدامات</div><div class="kpi"><b>${new Set(l.map(r=>r.phone)).size}</b>أفراد مختلفين</div><div class="kpi"><b>${new Set(l.map(r=>r.ip)).size}</b>عناوين IP</div></div>${Object.keys(by).length?'<p class="mut">'+Object.keys(by).map(k=>'<b dir="ltr">'+esc(k)+'</b>: '+by[k]).join(' · ')+'</p>':''}
-  <div class="tw"><table><tr><th>التاريخ</th><th>الكود</th><th>الاسم</th><th>الموبايل</th><th>المنصة</th><th>IP</th><th>طلب</th></tr>${l.map(r=>`<tr><td>${dt(r.at)}</td><td dir="ltr"><b>${esc(r.code)}</b></td><td>${esc(r.name||'')}</td><td dir="ltr">${esc(r.phone||'')}</td><td>${esc(r.src||'—')}</td><td dir="ltr">${esc(r.ip||'')}</td><td>${r.order_no?'#'+r.order_no:''}</td></tr>`).join('')||'<tr><td colspan="7">لسه محدش استخدم كود.</td></tr>'}</table></div><p class="mut">كل كود بيتقبل مرة واحدة بس لكل جهاز (IP) ولكل رقم موبايل.</p>`}
+  <div class="tw"><table><tr><th>التاريخ</th><th>الكود</th><th>الاسم</th><th>الموبايل</th><th>المنصة</th><th>IP</th><th>الدولة · المحافظة</th><th>طلب</th></tr>${l.map(r=>`<tr><td>${dt(r.at)}</td><td dir="ltr"><b>${esc(r.code)}</b></td><td>${esc(r.name||'')}</td><td dir="ltr">${esc(r.phone||'')}</td><td>${esc(r.src||'—')}</td><td dir="ltr">${esc(r.ip||'')}</td><td class="geo" data-ip="${esc(r.ip||'')}">…</td><td>${r.order_no?'#'+r.order_no:''}</td></tr>`).join('')||'<tr><td colspan="8">لسه محدش استخدم كود.</td></tr>'}</table></div><p class="mut">كل كود بيتقبل مرة واحدة بس لكل جهاز (IP) ولكل رقم موبايل. الموقع تقريبي من الـIP.</p>`;geoFill()}
  catch(e){b.innerHTML='تعذّر التحميل: '+esc(e.message)+' — شغّل ملف supabase-coupons.sql في Supabase.'}}
 async function loadVisits(){const b=$('#visBox');if(!b)return;
  if(!cloudOn()){b.textContent='اربط الموقع من الإعدادات الأول.';return}
  try{const d=await cApi('/rest/v1/rpc/visit_report',{method:'POST',body:'{}'});
   b.innerHTML=`<div class="kpis"><div class="kpi"><b>${n2(d.total||0)}</b>إجمالي الزيارات</div><div class="kpi"><b>${n2(d.today||0)}</b>زيارات النهاردة</div><div class="kpi"><b>${n2(d.ips||0)}</b>عناوين IP مختلفة</div><div class="kpi"><b>${n2(d.devices||0)}</b>أجهزة مختلفة</div></div>
-  <div class="tw"><table><tr><th>IP</th><th>عدد الزيارات</th><th>أجهزة</th><th>أول زيارة</th><th>آخر زيارة</th><th>آخر مصدر</th></tr>${(d.rows||[]).map(r=>`<tr><td dir="ltr">${esc(r.ip)}</td><td><b>${r.visits}</b></td><td>${r.devices}</td><td>${dt(r.first_at)}</td><td>${dt(r.last_at)}</td><td>${esc(r.last_src||'—')}</td></tr>`).join('')}</table></div>
-  <p class="mut">بيظهر آخر 300 عنوان IP. نفس الـIP ممكن يكون أكتر من شخص (شبكات الموبايل والواي فاي المشترك)، عشان كده فيه عمود «أجهزة».</p>`}
+  <div class="tw"><table><tr><th>IP</th><th>الدولة · المحافظة</th><th>عدد الزيارات</th><th>أجهزة</th><th>أول زيارة</th><th>آخر زيارة</th><th>آخر مصدر</th></tr>${(d.rows||[]).map(r=>`<tr><td dir="ltr">${esc(r.ip)}</td><td class="geo" data-ip="${esc(r.ip)}">…</td><td><b>${r.visits}</b></td><td>${r.devices}</td><td>${dt(r.first_at)}</td><td>${dt(r.last_at)}</td><td>${esc(r.last_src||'—')}</td></tr>`).join('')}</table></div>
+  <p class="mut">بيظهر آخر 300 عنوان IP. نفس الـIP ممكن يكون أكتر من شخص (شبكات الموبايل والواي فاي المشترك)، عشان كده فيه عمود «أجهزة». الدولة والمحافظة تقريبية من الـIP (ممكن تطلع القاهرة لشبكات الموبايل).</p>`;geoFill()}
  catch(e){b.innerHTML='تعذّر التحميل: '+esc(e.message)+' — شغّل ملف supabase-visits.sql مرة واحدة في Supabase.'}}
 
 /* ================= الإعدادات ================= */
