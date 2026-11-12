@@ -742,7 +742,13 @@ function repXlsx(){const r=repData();
   {name:'المصروفات',rows:[['التاريخ','البند','المبلغ','ملاحظة'],...r.ex.map(e=>[e.date,e.cat,e.amount,e.note])]}]),`تقرير-${S.from}-${S.to}.xlsx`)}
 
 const _repV=PAGE.reports;
-PAGE.reports=()=>{_repV();$('#main').insertAdjacentHTML('beforeend','<div class="card" id="visCard"><h3>👀 زيارات الموقع</h3><div id="visBox" class="mut">جاري التحميل...</div></div>');loadVisits()};
+PAGE.reports=()=>{_repV();$('#main').insertAdjacentHTML('beforeend','<div class="card" id="visCard"><h3>👀 زيارات الموقع</h3><div id="visBox" class="mut">جاري التحميل...</div></div><div class="card"><h3>🎟️ استخدام أكواد الخصم</h3><div id="cpuBox" class="mut">جاري التحميل...</div></div>');loadVisits();loadCpUses()};
+async function loadCpUses(){const b=$('#cpuBox');if(!b)return;
+ if(!cloudOn()){b.textContent='اربط الموقع الأول.';return}
+ try{const l=await cApi('/rest/v1/coupon_uses?select=*&order=at.desc&limit=300')||[],by={};l.forEach(r=>{by[r.code]=(by[r.code]||0)+1});
+  b.innerHTML=`<div class="kpis"><div class="kpi"><b>${l.length}</b>إجمالي الاستخدامات</div><div class="kpi"><b>${new Set(l.map(r=>r.phone)).size}</b>أفراد مختلفين</div><div class="kpi"><b>${new Set(l.map(r=>r.ip)).size}</b>عناوين IP</div></div>${Object.keys(by).length?'<p class="mut">'+Object.keys(by).map(k=>'<b dir="ltr">'+esc(k)+'</b>: '+by[k]).join(' · ')+'</p>':''}
+  <div class="tw"><table><tr><th>التاريخ</th><th>الكود</th><th>الاسم</th><th>الموبايل</th><th>المنصة</th><th>IP</th><th>طلب</th></tr>${l.map(r=>`<tr><td>${dt(r.at)}</td><td dir="ltr"><b>${esc(r.code)}</b></td><td>${esc(r.name||'')}</td><td dir="ltr">${esc(r.phone||'')}</td><td>${esc(r.src||'—')}</td><td dir="ltr">${esc(r.ip||'')}</td><td>${r.order_no?'#'+r.order_no:''}</td></tr>`).join('')||'<tr><td colspan="7">لسه محدش استخدم كود.</td></tr>'}</table></div><p class="mut">كل كود بيتقبل مرة واحدة بس لكل جهاز (IP) ولكل رقم موبايل.</p>`}
+ catch(e){b.innerHTML='تعذّر التحميل: '+esc(e.message)+' — شغّل ملف supabase-coupons.sql في Supabase.'}}
 async function loadVisits(){const b=$('#visBox');if(!b)return;
  if(!cloudOn()){b.textContent='اربط الموقع من الإعدادات الأول.';return}
  try{const d=await cApi('/rest/v1/rpc/visit_report',{method:'POST',body:'{}'});
