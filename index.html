@@ -267,7 +267,7 @@ const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
 
 const S={coupon:null,cpErr:'',products:[],shop:{shop_name:'تيتة',min_order:0,accepting:true},cart:lsGet('tt_cart',{}),opts:lsGet('tt_opts',{}),pm:null,cat:'',q:'',view:'cart',pay:'cash',busy:false,err:'',done:null,
-  f:lsGet('tt_cust',{name:'',phone:'',area:'',address:'',notes:'',ref:''})};
+  f:{...lsGet('tt_cust',{name:'',phone:'',area:'',address:'',notes:'',ref:''}),area:''}};
 const prod=c=>S.products.find(p=>p.code===c);
 const saveCart=()=>lsSet('tt_cart',S.cart);
 
@@ -603,7 +603,7 @@ async function cpApply(){
   catch(e){S.cpErr='مقدرناش نتأكد من الكود، جرّب تاني'}
   cpRedraw()}
 function totHTML(){const pc=promoCalc(),d=delivery(),min=+S.shop.min_order||0;
-  return cpBox()+`<div class="tot"><div><span>المنتجات</span><span>${n2(sub()+(pc?pc.adj:0))} ج</span></div>${pc&&pc.disc>0?`<div style="color:var(--plum)"><span>🏷️ ${esc(pc.name)}${pc.adj>0?' (بدل خصم المنتج)':''}</span><span>- ${n2(pc.disc)} ج</span></div>`:''}${d>0?`<div><span>التوصيل</span><span>${n2(d)} ج</span></div>`:''}<div class="g"><span>الإجمالي</span><span>${n2(sub()-promoD()+d)} ج</span></div></div>${promoHint()}${min&&sub()<min?`<div class="note">الحد الأدنى للطلب ${n2(min)} ج</div>`:''}`}
+  return cpBox()+`<div class="tot"><div><span>المنتجات</span><span>${n2(sub()+(pc?pc.adj:0))} ج</span></div>${pc&&pc.disc>0?`<div style="color:var(--plum)"><span>🏷️ ${esc(pc.name)}${pc.adj>0?' (بدل خصم المنتج)':''}</span><span>- ${n2(pc.disc)} ج</span></div>`:''}${d>0?`<div><span>التوصيل</span><span>${n2(d)} ج</span></div>`:(S.view=='form'?(deliveryAreas().some(a=>String(a.name).trim()===String(S.f.area||'').trim())?'<div><span>التوصيل</span><span>مجاني</span></div>':'<div style="color:#c62828"><span>التوصيل</span><span>اختار المنطقة</span></div>'):'')}<div class="g"><span>الإجمالي</span><span>${n2(sub()-promoD()+d)} ج</span></div></div>${promoHint()}${min&&sub()<min?`<div class="note">الحد الأدنى للطلب ${n2(min)} ج</div>`:''}`}
 function readForm(){const g=id=>($('#'+id)?.value??'').trim();
   S.f={name:g('f_name'),phone:g('f_phone'),area:g('f_area'),address:g('f_addr'),notes:g('f_notes'),ref:$('#f_ref')?g('f_ref'):S.f.ref};lsSet('tt_cust',{...S.f,ref:''})}
 function setPay(k){readForm();S.pay=k;S.err='';drawDrawer()}
@@ -621,14 +621,14 @@ async function submitOrder(){
   if(S.busy)return;readForm();
   if($('#f_hp')&&$('#f_hp').value)return; // سبام
   const f=S.f,digits=f.phone.replace(/\D/g,'');
-  const fail=m=>{S.err=m;drawDrawer()};
+  const fail=(m,id)=>{S.err=m;drawDrawer();toast('⚠️ '+m);const e=id&&$('#'+id);if(e){e.style.borderColor='#c62828';e.style.boxShadow='0 0 0 3px #c6282844';try{e.scrollIntoView({block:'center'})}catch(_){}e.focus()}};
   const om=optMissing();if(om)return fail('اختار '+om.g.name+' لـ '+om.p.name);
-  if(f.name.length<2)return fail('اكتب اسمك');
-  if(digits.length<10)return fail('رقم الموبايل مش مظبوط');
-  if(!deliveryAreas().some(a=>String(a.name).trim()===String(f.area||'').trim()))return fail('اختار منطقة التوصيل عشان نحدد السعر');
-  if(f.address.length<3)return fail('اكتب عنوانك بالتفصيل');
+  if(f.name.length<2)return fail('اكتب اسمك','f_name');
+  if(digits.length<10)return fail('اكتب رقم الموبايل (10 أرقام على الأقل)','f_phone');
+  if(!deliveryAreas().some(a=>String(a.name).trim()===String(f.area||'').trim()))return fail('اختار منطقة التوصيل عشان نحدد سعر الشحن، الطلب مش هيكمل من غيرها','f_area');
+  if(f.address.length<3)return fail('اكتب عنوانك بالتفصيل','f_addr');
   const tr=!!(payMethods().find(m=>m.k==S.pay)||{}).transfer,file=$('#f_rec')&&$('#f_rec').files[0];
-  if(tr&&!f.ref&&!file)return fail('اكتب رقم العملية أو ارفع صورة التحويل');
+  if(tr&&!f.ref&&!file)return fail('اكتب رقم العملية أو ارفع صورة التحويل','f_ref');
   S.busy=true;S.err='';drawDrawer();
   try{
     if(S.coupon){const r=await cpCheck(S.coupon.code);
