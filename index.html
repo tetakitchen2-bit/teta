@@ -266,7 +266,7 @@ function toast(m){const t=$('#toast');t.textContent=m;t.className='show';clearTi
 const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
 
-const S={coupon:null,cpErr:'',products:[],shop:{shop_name:'تيتة',min_order:0,accepting:true},cart:lsGet('tt_cart',{}),opts:lsGet('tt_opts',{}),pm:null,cat:'',q:'',view:'cart',pay:'cash',busy:false,err:'',done:null,
+const S={coupon:null,cpErr:'',products:[],shop:{shop_name:'تيتة',min_order:0,accepting:true},cart:lsGet('tt_cart',{}),opts:lsGet('tt_opts',{}),pm:null,cat:'',q:'',view:'cart',pay:'',busy:false,err:'',done:null,
   f:{...lsGet('tt_cust',{name:'',phone:'',area:'',address:'',notes:'',ref:''}),area:''}};
 const prod=c=>S.products.find(p=>p.code===c);
 const saveCart=()=>lsSet('tt_cart',S.cart);
@@ -575,7 +575,7 @@ function drawDrawer(){
   $('#dTitle').textContent='بياناتك';
   const sh=S.shop,f=S.f;
   const PM=payMethods(),pays=PM.map(m=>[m.k,m.label]);
-  if(!pays.some(x=>x[0]==S.pay))S.pay=pays[0][0];
+  if(S.pay&&!pays.some(x=>x[0]==S.pay))S.pay='';
   const cur=PM.find(m=>m.k==S.pay)||{},tr=!!cur.transfer,num=cur.number||'';
   body.innerHTML=`<input class="hp" id="f_hp" tabindex="-1" autocomplete="off">
   <label class="f">الاسم</label><input class="in" id="f_name" value="${esc(f.name)}" autocomplete="name">
@@ -584,7 +584,7 @@ function drawDrawer(){
   <label class="f">ملاحظات (اختياري)</label><input class="in" id="f_notes" value="${esc(f.notes)}">
   ${shipHTML()}
   <label class="f">طريقة الدفع</label>
-  ${pays.map(([k,l])=>`<label class="pm ${S.pay==k?'on':''}"><input type="radio" name="pay" ${S.pay==k?'checked':''} onchange="setPay('${k}')"> ${l}</label>`).join('')}
+  <div id="payBox" style="border-radius:12px;padding:2px">${pays.map(([k,l])=>`<label class="pm ${S.pay==k?'on':''}"><input type="radio" name="pay" ${S.pay==k?'checked':''} onchange="setPay('${k}')"> ${l}</label>`).join('')}</div>
   ${tr?`<div class="note">حوّل <b>${n2(netTot())} ج</b> على ${esc(cur.name||'')}:<br><b class="cp" onclick="copyTxt('${esc(num)}')">${esc(num)}</b> <small>(اضغط للنسخ)</small>${cur.note?'<br>'+esc(cur.note):''}<br>وبعدها اكتب رقم العملية أو ارفع صورة التحويل.</div>
   <label class="f">رقم العملية / رقم المحوَّل منه</label><input class="in" id="f_ref" value="${esc(f.ref||'')}">
   <label class="f">صورة التحويل (اختياري لو كتبت الرقم)</label><input class="in" id="f_rec" type="file" accept="image/*">`:''}
@@ -627,6 +627,7 @@ async function submitOrder(){
   if(digits.length<10)return fail('اكتب رقم الموبايل (10 أرقام على الأقل)','f_phone');
   if(!deliveryAreas().some(a=>String(a.name).trim()===String(f.area||'').trim()))return fail('اختار منطقة التوصيل عشان نحدد سعر الشحن، الطلب مش هيكمل من غيرها','f_area');
   if(f.address.length<3)return fail('اكتب عنوانك بالتفصيل','f_addr');
+  if(!S.pay)return fail('اختار طريقة الدفع عشان الطلب يكمل','payBox');
   const tr=!!(payMethods().find(m=>m.k==S.pay)||{}).transfer,file=$('#f_rec')&&$('#f_rec').files[0];
   if(tr&&!f.ref&&!file)return fail('اكتب رقم العملية أو ارفع صورة التحويل','f_ref');
   S.busy=true;S.err='';drawDrawer();
@@ -645,7 +646,7 @@ async function submitOrder(){
       p_items:items().map(x=>({code:x.p.code,qty:x.q}))})});
     S.done={...res,delivery:delivery(),total:netTot(),promo:(promoCalc()||{disc:0}).disc,promoName:(promoCalc()||{}).name||'',pay:payName,ref:f.ref,name:f.name,phone:f.phone,area:f.area,address:f.address,notes:f.notes,lines:items().map(x=>({n:x.p.name+' '+sizeOf(x.p)+(hasOpts(x.p)&&optText(x.p)?' ('+optText(x.p)+')':''),q:x.q,t:(((promoCalc()||{codes:[]}).codes.includes(x.p.code))?unitOrig(x.p):unit(x.p))*x.q}))};
     if(S.coupon){try{await api('/rest/v1/rpc/coupon_used',{method:'POST',body:JSON.stringify({p_code:S.coupon.code,p_name:f.name,p_phone:f.phone,p_src:attrNote().replace('مصدر: ',''),p_order_no:res.no||null})})}catch(e){}}
-    track('Purchase',{value:S.done.total,id:'TT'+S.done.no,items:cartItemsT()});S.cart={};S.coupon=null;saveCart();S.view='done';
+    track('Purchase',{value:S.done.total,id:'TT'+S.done.no,items:cartItemsT()});S.cart={};S.coupon=null;S.pay='';saveCart();S.view='done';
     for(const p of S.products){const el=$('#c-'+p.code);if(el)el.innerHTML=ctl(p)}
     updCart()
   }catch(e){S.err=e.message||'حصلت مشكلة، حاول تاني'}
